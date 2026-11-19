@@ -17,5 +17,7 @@ test("demo/index.html draws the sample without errors", { timeout: 60000, skip: 
     assert.deepEqual(page.console.filter((l) => l.startsWith("EXCEPTION")), []);
     const blocked = await (await fetch(srv.url + "../../etc/passwd")).status;
     assert.notEqual(blocked, 200, "the server does not serve outside the repository");
-  } finally { await page.close(); srv.server.close(); }
+  } finally {
+    try { await page.close(); } finally { srv.server.closeAllConnections(); srv.server.close(); }
+  }
 });

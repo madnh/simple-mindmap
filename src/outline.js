@@ -24,7 +24,7 @@ function symbol(doc, n, statuses) {
   return svg;
 }
 
-// ctx: {doc, data, idx, rootId, collapsed, selected, hits, current, statuses, strings, badge}
+// ctx: {doc, data, idx, rootId, collapsed, selected, hits, current, statuses, strings, badge, dim, keep}
 export function buildOutline(ctx) {
   const { doc, idx, collapsed, statuses } = ctx;
   const tree = doc.createElement("ul");
@@ -38,7 +38,8 @@ export function buildOutline(ctx) {
     li.setAttribute("role", "treeitem");
     li.setAttribute("aria-level", String(level));
     li.dataset.id = id;
-    const kids = (n.children || []).map((c, i) => c.id || (e.num ? `${e.num}.${i + 1}` : String(i + 1)));
+    const all = (n.children || []).map((c, i) => c.id || (e.num ? `${e.num}.${i + 1}` : String(i + 1)));
+    const kids = ctx.keep ? all.filter((k) => ctx.keep.has(k)) : all; // filterOnly hides branches without a match
     const open = kids.length > 0 && !collapsed.has(id);
     if (kids.length) li.setAttribute("aria-expanded", String(open));
     const row = doc.createElement("div");
@@ -47,6 +48,7 @@ export function buildOutline(ctx) {
     if (ctx.selected === id) { cls.push("is-selected"); li.setAttribute("aria-selected", "true"); }
     if (ctx.hits && ctx.hits.has(id)) cls.push("is-hit");
     if (ctx.current === id) cls.push("is-current");
+    if (ctx.dim && ctx.dim.has(id)) cls.push("is-dim");
     if (n.status && statuses[n.status] && statuses[n.status].shape === "superseded") cls.push("is-superseded");
     row.className = cls.join(" ");
     if (kids.length) {

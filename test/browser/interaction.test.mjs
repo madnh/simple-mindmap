@@ -16,7 +16,9 @@ before(async () => {
   await page.goto(srv.url + "test/browser/page.html");
   await page.waitFor("window.ready === true");
 });
-after(async () => { if (page) await page.close(); if (srv) srv.server.close(); });
+after(async () => {
+  try { if (page) await page.close(); } finally { if (srv) { srv.server.closeAllConnections(); srv.server.close(); } }
+});
 
 const ev = (expr) => page.eval(`(async () => { ${expr} })()`);
 const names = () => page.eval("names()");
@@ -328,6 +330,44 @@ t("a rendering failure is caught: error text + error event, the page keeps worki
     return { text: document.getElementById("host").textContent, ev: events.map((x) => [x.e, x.p.message]) };`);
   assert.ok(r.text.includes("RENDER-FAILED"));
   assert.deepEqual(r.ev, [["error", "boom"]]);
+});
+
+t("status filter: setFilter dims non-matching nodes (map and outline), emits nothing, rejects unknown statuses", async () => {
+  await make({ mode: "select" });
+  const r = await ev(`
+    const res = mm.setFilter(["pending", "decided"]);
+    const dimMap = [...document.querySelectorAll("#host .mm-node.is-dim")].map((g) => g.getAttribute("data-id")).sort();
+    const bad = mm.setFilter(["nope"]);
+    const still = mm.getState().filter;
+    mm.setView("outline");
+    const dimRows = [...document.querySelectorAll("#host .mm-row.is-dim")].map((r) => r.closest("li").dataset.id).sort();
+    const rows = document.querySelectorAll("#host [role=treeitem]").length;
+    mm.setFilterOnly(true);
+    const shown = [...document.querySelectorAll("#host [role=treeitem]")].map((li) => li.dataset.id);
+    mm.setFilter(null);
+    const cleared = document.querySelectorAll("#host .is-dim").length;
+    await new Promise((r) => setTimeout(r, 50));
+    return { res, dimMap, bad, still, dimRows, rows, shown, cleared, events: names() };`);
+  assert.deepEqual(r.res, { ok: true });
+  assert.deepEqual(r.dimMap, ["a1", "a2", "c", "r"], "dimmed, not hidden");
+  assert.equal(r.bad.ok, false);
+  assert.equal(r.bad.errors[0].code, "bad_status");
+  assert.deepEqual(r.still, ["pending", "decided"], "a rejected filter changes nothing");
+  assert.deepEqual(r.dimRows, ["a1", "a2", "c", "r"]);
+  assert.equal(r.rows, 6, "outline keeps every row without filterOnly");
+  assert.deepEqual(r.shown, ["r", "a", "b"], "filterOnly hides branches without a match");
+  assert.equal(r.cleared, 0);
+  assert.deepEqual(r.events, []);
+});
+
+t("status filter: option, state round trip, SVG export fades the same nodes", async () => {
+  await make({ mode: "select", filter: ["blocked"], filterOnly: true, view: "outline" });
+  const s = await page.eval("mm.getState()");
+  assert.deepEqual([s.filter, s.filterOnly], [["blocked"], true]);
+  const back = await page.eval(`make({ data: ${JSON.stringify(SMALL)}, state: ${JSON.stringify(s)} }).getState()`);
+  assert.deepEqual([back.filter, back.filterOnly], [["blocked"], true]);
+  const svg = await page.eval(`mm.setView("right"); mm.setFilter(["decided"]); mm.export("svg")`);
+  assert.equal((svg.match(/opacity="0.35"/g) || []).length, 5);
 });
 
 t("CSS is injected once per document as <style id=simple-mindmap-css>; destroy removes the component", async () => {

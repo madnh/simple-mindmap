@@ -94,6 +94,7 @@
 .simple-mindmap .mm-row .mm-num { font-family: var(--mm-mono); font-size: 11px; color: var(--mm-muted); padding-top: 2px; white-space: nowrap; }
 .simple-mindmap .mm-row .mm-title { white-space: normal; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
 .simple-mindmap .mm-row .mm-badge { color: var(--mm-muted); font-size: 11px; padding-top: 2px; }
+.simple-mindmap .mm-row.is-dim { opacity: 0.35; }
 .simple-mindmap .mm-row.is-superseded .mm-title { text-decoration: line-through; opacity: 0.55; }
 .simple-mindmap .mm-arrow {
   flex: none; width: 16px; height: 18px; border: 0; padding: 0; background: none; color: var(--mm-muted); cursor: pointer; font-size: 11px;

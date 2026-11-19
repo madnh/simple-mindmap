@@ -68,3 +68,9 @@ test("collapsed branches and badges are drawn", () => {
 test("invalid data gives null", () => {
   assert.equal(toSVG({ root: {} }, { measure: fakeMeasure }), null);
 });
+
+test("filter fades every node whose status is not listed", () => {
+  const s = svg("statuses-tones.json", { filter: ["open", "blocked"] });
+  assert.equal((s.match(/<g transform="[^"]*" data-id="[^"]*" opacity="0.35"/g) || []).length, 13 - 2);
+  assert.ok(!svg("statuses-tones.json").includes('opacity="0.35"'));
+});

@@ -94,7 +94,7 @@ const mm = createMindmap(el, {
   data,                      // JSON as above
   view: "both",              // "both" | "right" | "outline"
   mode: "view",              // "view" | "select" | "edit"
-  state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search}; state.view wins over `view`
+  state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search, filter, filterOnly}; state.view wins over `view`
   collapseDepth: null,       // collapse every node at this depth (root = 0) when there is no `state`
   actions: [],               // menu items of a node: [{id, label, when?(node) -> bool}]
   strings: {},               // every visible text (see "Strings")
@@ -103,6 +103,8 @@ const mm = createMindmap(el, {
   search: true, tools: true, // the floating search box and the tools; turn off when you draw your own
   limits: null,              // tighter limits: {nodes, depth, title, label, note, meta}
   theme: null,               // "light" | "dark" to force a palette; default follows prefers-color-scheme
+  filter: null,              // null or a list of statuses: nodes whose status is not listed are dimmed (never hidden)
+  filterOnly: false,         // outline only: with a filter, hide branches that contain no matching node
 });
 ```
 
@@ -111,12 +113,14 @@ const mm = createMindmap(el, {
 | `mm.setData(json)` | replaces the whole tree, keeping selection, collapsed nodes and viewport by id where they still exist. Bad data: the drawn tree stays, returns `{ok: false, errors}` and emits `invalid` |
 | `mm.apply(ops)` | applies a batch atomically (see Operations). Any error: nothing changes, returns `{ok: false, errors, index}` and emits `invalid` |
 | `mm.select(id)` `mm.reveal(id)` `mm.focus(id \| null)` `mm.collapse(id)` `mm.expand(id)` `mm.setView(kind)` `mm.fit()` | change the view; return `false` for an unknown id |
+| `mm.setFilter(list \| null)` | dims every node whose status is not in `list` (a node without status never matches); returns `{ok: true}`, or `{ok: false, errors}` with `bad_status` for an unknown status (nothing changes) |
+| `mm.setFilterOnly(bool)` | outline: hide branches without a match while a filter is set; returns `{ok: true}` |
 | `mm.search(q)` `mm.next()` `mm.prev()` | `{hits: [ids], index}`; matches titles (case and accent insensitive) and position numbers, never internal ids |
 | `mm.getData()` | a deep copy of the current data (no view state), or `null` before any valid data |
 | `mm.getNode(id)` | `{id, path, parent, children: [ids], node: {id, title, note?, status?, tone?, collapsed?, meta?}}` (a copy) or `null` |
 | `mm.getPath(id)` | `"3.2"` (root: `""`) or `null` |
 | `mm.find(q)` | ids that match, same rule as the search box |
-| `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search}` |
+| `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search, filter, filterOnly}` |
 | `mm.export(fmt)` | `"json"`, `"outline"` (Markdown), `"mermaid"`, `"svg"` (the current view, measured by this page, concrete colours); `null` before valid data |
 | `mm.errors` / `mm.warnings` | the last validation result (copies) |
 | `mm.on(event, fn)` | returns a function that removes the listener |
@@ -127,7 +131,7 @@ Pure functions (`simple-mindmap/core`, no DOM): `validate(json, {limits, statuse
 `toMermaid(json)`, `fromOutline(markdown, {rootTitle})`, `pathOf(json, id)`.
 
 Functions that measure text (browser only, also exported from `simple-mindmap`): `layout(data, {view, collapsed, focus,
-measure, badge})` and `toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected})`.
+measure, badge})` and `toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected, filter})`.
 `measure(text, kind)` returns a width in pixels for `kind` = `"root"`, `"node"`, `"num"` or `"small"`.
 
 ### Operations
@@ -222,6 +226,9 @@ Within 1.x validation only ever gets looser. The 1.0 sample data set in `test/fi
 - Cross links: `blocks` red with an arrow, `supersedes` grey with an arrow, `relates` thin dashed. By default only `blocks`
   and the links of the selected node are drawn; "All links" shows the rest. A link end inside a collapsed branch stops at
   the nearest visible ancestor (hollow dot).
+- Status filter (`filter` / `setFilter`): non-matching nodes fade but keep their place, so the shape of the tree stays;
+  in the outline `filterOnly` hides branches with no match. The filter chips are yours to draw; the filter is a host
+  call and emits no event.
 - More than 80 nodes: the map opens collapsed to depth 2, the outline to depth 3 (unless `state` or `collapseDepth`).
 - Each node shows its status symbol (or tone dot), its position number (`3.2`, monospace, muted) and its title (clipped
   at 48 graphemes with `...` on the map, full in the tooltip and in the outline). Internal ids are never shown.

@@ -63,7 +63,7 @@ export async function launch() {
     async goto(url) {
       const loaded = new Promise((r) => { const h = (m) => { if (m.method === "Page.loadEventFired") { handlers.splice(handlers.indexOf(h), 1); r(); } }; handlers.push(h); });
       await send("Page.navigate", { url });
-      await loaded;
+      await Promise.race([loaded, sleep(20000).then(() => { throw new Error(`load of ${url} timed out`); })]);
     },
     async eval(expr) {
       const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
@@ -101,7 +101,15 @@ export async function launch() {
       const { writeFileSync } = await import("node:fs");
       writeFileSync(path, Buffer.from(r.data, "base64"));
     },
-    async close() { try { await send("Browser.close"); } catch { /* gone */ } ws.close(); proc.kill(); await sleep(100); rmSync(profile, { recursive: true, force: true }); },
+    async close() {
+      // Chrome may still be writing its profile while it exits: wait for the exit, then retry the removal.
+      const exited = proc.exitCode !== null ? Promise.resolve() : new Promise((r) => proc.once("exit", r));
+      try { await send("Browser.close"); } catch { /* already gone */ }
+      ws.close();
+      proc.kill();
+      await Promise.race([exited, sleep(5000)]);
+      try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) { console.error(`# could not remove ${profile}: ${e.message}`); }
+    },
   };
   return page;
 }

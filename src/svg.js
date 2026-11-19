@@ -175,7 +175,9 @@ export function scene(data, lay, opts = {}) {
       ] }));
     }
     kids.push(el("title", {}, { x: n.title }));
-    return el("g", { transform: `translate(${r2(b.x)},${r2(b.y)})`, "data-id": b.id }, { c: cls.join(" "), k: kids });
+    const ga = { transform: `translate(${r2(b.x)},${r2(b.y)})`, "data-id": b.id };
+    if (opts.dim && opts.dim.has(b.id)) ga.opacity = 0.35;
+    return el("g", ga, { c: cls.join(" "), k: kids });
   });
   return { bounds: lay.bounds, defs, edges, links, nodes };
 }
@@ -205,14 +207,16 @@ export function serialize(spec, theme = THEME) {
   return inner ? `${s}>${inner}</${spec.t}>` : `${s}/>`;
 }
 
-// toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected, padding}) -> string | null
+// toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected, filter, padding}) -> string | null
 export function toSVG(json, opts = {}) {
   const v = validate(json, { statuses: opts.statuses, limits: opts.limits });
   if (!v.ok) return null;
   const data = v.data;
   const statuses = opts.statuses || DEFAULT_STATUSES;
   const lay = layout(data, { view: opts.view || data.layout || "both", collapsed: opts.collapsed, focus: opts.focus, measure: opts.measure, badge: opts.badge });
-  const sc = scene(data, lay, { statuses, strings: opts.strings, selected: opts.selected, links: opts.links, uid: "mm" });
+  let dim = null;
+  if (Array.isArray(opts.filter)) { dim = new Set(); for (const [id, e] of indexTree(data)) if (!e.node.status || !opts.filter.includes(e.node.status)) dim.add(id); }
+  const sc = scene(data, lay, { statuses, strings: opts.strings, selected: opts.selected, links: opts.links, uid: "mm", dim });
   const theme = { ...THEME, ...(opts.theme || {}) };
   const pad = opts.padding ?? 20;
   const { x0, y0, w, h } = lay.bounds;
