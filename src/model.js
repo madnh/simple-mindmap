@@ -28,12 +28,12 @@ export function graphemes(s) {
 }
 export function clip(s, n) { const g = graphemes(s); return g.length > n ? g.slice(0, n - 1).join("") + "\u2026" : s; }
 export function oneLine(s) { return s.normalize("NFC").replace(CONTROL, ""); }
-const bytes = (s) => new TextEncoder().encode(s).length;
+export const bytes = (s) => new TextEncoder().encode(s).length;
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 export function isValidId(id) { return typeof id === "string" && ID_RE.test(id) && HAS_LETTER.test(id); }
 
-function statusKeys(statuses) {
+export function statusKeys(statuses) {
   if (!statuses) return new Set(STATUS_KEYS);
   return new Set(Array.isArray(statuses) ? statuses : Object.keys(statuses));
 }
@@ -154,7 +154,10 @@ export function validate(input, opts = {}) {
         let bad = false;
         if (!LINK_TYPES.includes(type)) { err(`${p}.type`, "bad_link", `Unknown link type ${JSON.stringify(l.type)}`); bad = true; }
         for (const end of ["from", "to"]) {
-          if (typeof l[end] !== "string" || !all.has(l[end])) { err(`${p}.${end}`, "bad_link", `Link ${end} ${JSON.stringify(l[end])} is not a node`, { id: typeof l[end] === "string" ? l[end] : undefined }); bad = true; }
+          if (typeof l[end] !== "string" || !ids.has(l[end])) {
+            const msg = typeof l[end] === "string" && all.has(l[end]) ? `Link ${end} "${l[end]}" is a position, not a node id; give the node an id` : `Link ${end} ${JSON.stringify(l[end])} is not a node`;
+            err(`${p}.${end}`, "bad_link", msg, { id: typeof l[end] === "string" ? l[end] : undefined }); bad = true;
+          }
         }
         if (!bad && l.from === l.to) { err(p, "self_link", `Node "${l.from}" links to itself`, { id: l.from }); bad = true; }
         const out = { from: l.from, to: l.to, type };

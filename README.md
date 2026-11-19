@@ -70,7 +70,7 @@ import { validate, applyOps, toOutline, toMermaid, fromOutline, pathOf } from "s
 | node `collapsed` | `true` to open the node collapsed |
 | node `meta` | any object up to 4 KiB; never read by the library, handed back to your `badge` callback |
 | node `children` | array of nodes |
-| `links[]` | `from`, `to` (node ids, not the same node), `type` (`relates` default, `blocks`, `supersedes`), optional `label` (at most 60 graphemes) |
+| `links[]` | `from`, `to` (explicit node `id`s, not the same node; a position number such as `"2"` is refused with `bad_link`, because positions shift when nodes are added), `type` (`relates` default, `blocks`, `supersedes`), optional `label` (at most 60 graphemes) |
 
 Limits: 2 000 nodes, depth 16 (the root is level 1). Position numbers such as `3.2` are computed from the tree; they are
 not a field of the data.
@@ -96,7 +96,7 @@ const mm = createMindmap(el, {
   mode: "view",              // "view" | "select" | "edit"
   state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search, filter, filterOnly}; state.view wins over `view`
   collapseDepth: null,       // collapse every node at this depth (root = 0) when there is no `state`
-  actions: [],               // menu items of a node: [{id, label, when?(node) -> bool}]
+  actions: [],               // menu items of a node: [{id, label, icon?, when?(node) -> bool}]; icon is a short text symbol drawn before the label
   strings: {},               // every visible text (see "Strings")
   statuses: {},              // {key: {label, shape?, symbol?, color?}}; replaces the default six when given
   badge: null,               // (node) -> {symbol, label} | null; a small extra mark you decide; called on every draw
@@ -111,8 +111,9 @@ const mm = createMindmap(el, {
 | Method | Result |
 |---|---|
 | `mm.setData(json)` | replaces the whole tree, keeping selection, collapsed nodes and viewport by id where they still exist. Bad data: the drawn tree stays, returns `{ok: false, errors}` and emits `invalid` |
-| `mm.apply(ops)` | applies a batch atomically (see Operations). Any error: nothing changes, returns `{ok: false, errors, index}` and emits `invalid` |
+| `mm.apply(ops)` | applies a batch atomically (see Operations). Any error: nothing changes, returns `{ok: false, errors, index}` and emits `invalid`. It never throws: a payload JSON cannot hold (a BigInt, a cycle) is `bad_op` / `bad_meta` at `ops[i]` |
 | `mm.select(id)` `mm.reveal(id)` `mm.focus(id \| null)` `mm.collapse(id)` `mm.expand(id)` `mm.setView(kind)` `mm.fit()` | change the view; return `false` for an unknown id |
+| `mm.focusSearch()` | puts the cursor in the search box of the open view (what Cmd/Ctrl+F does inside the component), for a host shortcut. `false` when there is no data or `search: false` |
 | `mm.setFilter(list \| null)` | dims every node whose status is not in `list` (a node without status never matches); returns `{ok: true}`, or `{ok: false, errors}` with `bad_status` for an unknown status (nothing changes) |
 | `mm.setFilterOnly(bool)` | outline: hide branches without a match while a filter is set; returns `{ok: true}` |
 | `mm.search(q)` `mm.next()` `mm.prev()` | `{hits: [ids], index}`; matches titles (case and accent insensitive) and position numbers, never internal ids |
@@ -161,6 +162,8 @@ with the index of the failing op (or `null` when the final check failed) and not
 - In `edit` mode the component **only emits `intent`**. Check it, store it, then call `mm.apply([intent])`.
 - **Interaction events** (`select`, `open`, `action`, `toggle`, `view`, `viewport`, `search`, `intent`) come only from user
   input, never from your calls to `apply`, `setData`, `select` and the other methods.
+  A user click on a node emits `select` even when it was already selected. When the user collapses a branch that holds
+  the selection, the selection moves to that branch: `toggle` is followed by `select {id}` of the new selection.
 - **State events** (`invalid {errors, source, index?}`, `error {message}`) are emitted for your calls too. Events raised while
   `createMindmap` runs are delivered right after it returns, so a listener added on the next line receives them.
 - Enter in the search box goes to the next match (Shift+Enter: previous) and never emits `open`.
@@ -212,7 +215,7 @@ Within 1.x validation only ever gets looser. The 1.0 sample data set in `test/fi
 | `createMindmap` with bad data | draws no tree, shows the error as text (`strings.invalid` + `strings.errorLine(firstError)`), emits `invalid {source: "init"}`; `mm.errors` holds the list; a later valid `setData` draws normally |
 | `setData` with bad data | keeps the current picture, emits `invalid {source: "setData"}`, returns `{ok: false, errors}` |
 | `apply` with a bad batch | atomic: nothing changes, emits `invalid {source: "apply", index}`, returns `{ok: false, errors, index}` |
-| a drawing failure (for example text measuring throws) | caught; error text `strings.renderFailed`; emits `error {message}` |
+| a drawing failure (for example text measuring throws) | caught; error text `strings.renderFailed` and `strings.renderFailedDetail` (`{message}`); emits `error {message}` |
 | before any valid data | `getData()` and `getNode()` return `null`, `find()` returns `[]`, `export()` returns `null` |
 
 ## Views
@@ -237,7 +240,8 @@ Within 1.x validation only ever gets looser. The 1.0 sample data set in `test/fi
 ## Theming
 
 The component injects its CSS once per document as `<style id="simple-mindmap-css">` (the same text as
-`src/mindmap.css`). Override the variables on `.simple-mindmap` or any ancestor:
+`src/mindmap.css`), first in `<head>`, so your stylesheets come after it. The public knobs are the `--mm-*` variables;
+set them on `.simple-mindmap` or on any ancestor (for example your app's own theme class), in light and dark alike:
 
 `--mm-bg`, `--mm-text`, `--mm-muted`, `--mm-node-bg`, `--mm-node-border`, `--mm-root-bg`, `--mm-root-text`, `--mm-select`,
 `--mm-hit`, `--mm-hit-current`, `--mm-chip-bg`, `--mm-green`, `--mm-amber`, `--mm-red`, `--mm-blue`, `--mm-purple`,
@@ -245,13 +249,15 @@ The component injects its CSS once per document as `<style id="simple-mindmap-cs
 `--mm-font`, `--mm-mono`.
 
 A dark palette applies under `prefers-color-scheme: dark` unless `data-theme="light"`; `theme: "dark"` forces it.
+A `--mm-*` value you set always wins over both palettes. The defaults live in private `--mmd-*` variables, which are
+internal and not part of the 1.x API.
 `export("svg")` reads the current values, so the file has concrete colours and opens anywhere.
 
 ## Strings
 
 Every visible text comes from `strings` (English defaults). A value is a string with `{placeholders}` or a function.
 
-`invalid`, `renderFailed`, `errorLine(error)`, `search`, `searchLabel`, `matches` (`{index}`, `{total}`), `noMatches`,
+`invalid`, `renderFailed`, `renderFailedDetail` (`{message}`), `errorLine(error)`, `search`, `searchLabel`, `matches` (`{index}`, `{total}`), `noMatches`,
 `prevMatch`, `nextMatch`, `views`, `viewBoth`, `viewRight`, `viewOutline`, `allLinks`, `zoomIn`, `zoomOut`, `fit`,
 `focusBranch`, `focusPath`, `more`, `expand`, `collapse`, `rename`, `addChild`, `addSibling`, `remove`, `newIdea`,
 `hidden` (`{n}`), `linkBlocks`, `linkSupersedes`, `linkRelates`. Status labels come from `statuses`.

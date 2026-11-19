@@ -256,7 +256,8 @@ t("outline: click selects, arrow toggles, keyboard moves", async () => {
   assert.equal(await page.eval("mm.getState().selected"), "a1");
   const arrow = await page.eval(`(() => { const r = document.querySelector('#host [data-id="a"] > .mm-row .mm-arrow').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await page.click(arrow.x, arrow.y);
-  assert.deepEqual(await page.eval("events.map((x) => x.e)"), ["select", "select", "toggle"]);
+  assert.deepEqual(await page.eval("events.map((x) => [x.e, x.p.id])"), [["select", "a"], ["select", "a1"], ["toggle", "a"], ["select", "a"]],
+    "a toggle that moves the selection reports the new selection");
   assert.equal(await page.eval("mm.getState().selected"), "a", "selection moves out of a collapsed branch");
 });
 
@@ -324,11 +325,12 @@ t("a rendering failure is caught: error text + error event, the page keeps worki
     const orig = CanvasRenderingContext2D.prototype.measureText;
     CanvasRenderingContext2D.prototype.measureText = () => { throw new Error("boom"); };
     try {
-      make({ data: { root: { title: "Unmeasured title " + Math.random() } }, strings: { renderFailed: "RENDER-FAILED" } });
+      make({ data: { root: { title: "Unmeasured title " + Math.random() } }, strings: { renderFailed: "RENDER-FAILED", renderFailedDetail: "DETAIL<{message}>" } });
     } finally { CanvasRenderingContext2D.prototype.measureText = orig; }
     await Promise.resolve(); await Promise.resolve();
     return { text: document.getElementById("host").textContent, ev: events.map((x) => [x.e, x.p.message]) };`);
   assert.ok(r.text.includes("RENDER-FAILED"));
+  assert.ok(r.text.includes("DETAIL<boom>"), "the failure detail goes through strings");
   assert.deepEqual(r.ev, [["error", "boom"]]);
 });
 
@@ -379,4 +381,126 @@ t("CSS is injected once per document as <style id=simple-mindmap-css>; destroy r
     const left = extra.childNodes.length; extra.remove();
     return { styles, left };`);
   assert.deepEqual(r, { styles: 1, left: 0 });
+});
+
+const box = (sel) => page.eval(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left, bottom: r.bottom }; })()`);
+
+t("a user click on the node the host already selected still emits select", async () => {
+  await make({ mode: "select" });
+  await ev(`mm.select("b"); events.length = 0;`);
+  const c = await center("b");
+  await page.click(c.x, c.y);
+  await settle();
+  assert.deepEqual(await page.eval("events.filter((x) => x.e === 'select').map((x) => x.p.id)"), ["b"]);
+});
+
+t("focusSearch() puts the cursor in the search box of the open view, emits nothing", async () => {
+  await make({ mode: "select" });
+  const r = await ev(`
+    document.body.focus();
+    const map = mm.focusSearch(), inMap = document.activeElement && document.activeElement.type === "search" && !!document.activeElement.closest("#host");
+    mm.setView("outline"); document.body.focus();
+    const ol = mm.focusSearch(), inOutline = document.activeElement && document.activeElement.type === "search" && !!document.activeElement.closest("#host .mm-outline");
+    const ev0 = events.length;
+    make({ data: ${JSON.stringify(SMALL)}, search: false });
+    return { map, inMap, ol, inOutline, ev0, off: mm.focusSearch() };`);
+  assert.deepEqual(r, { map: true, inMap: true, ol: true, inOutline: true, ev0: 0, off: false });
+});
+
+t("menu actions draw icon as text before the label", async () => {
+  await ev(`make({ data: ${JSON.stringify(SMALL)}, mode: "select", actions: [{ id: "copy", label: "Copy id", icon: "<b>#</b>" }, { id: "plain", label: "Plain" }] })`);
+  const c = await center("b");
+  await page.click(c.x, c.y);
+  const more = await box("#host .mm-more");
+  await page.click(more.x, more.y);
+  const r = await page.eval(`[...document.querySelectorAll('#host .mm-menu button')].map((b) => ({ icon: b.querySelector(".mm-icon") ? b.querySelector(".mm-icon").textContent : null, text: b.textContent, tags: b.querySelectorAll("b").length }))`);
+  assert.deepEqual(r, [{ icon: "<b>#</b>", text: "<b>#</b>Copy id", tags: 0 }, { icon: null, text: "Plain", tags: 0 }]);
+  const item = await box("#host .mm-menu button");
+  await page.click(item.x, item.y);
+  assert.deepEqual(await page.eval("events.at(-1)"), { e: "action", p: { action: "copy", id: "b" } });
+});
+
+t("focus crumbs: inside the map at the bottom left, one button per level, a click focuses that level", async () => {
+  await make({ mode: "select" });
+  await ev(`mm.focus("a1");`);
+  const host = await page.eval("(() => { const r = document.getElementById('host').getBoundingClientRect(); return { left: r.left, bottom: r.bottom }; })()");
+  const nav = await box("#host .simple-mindmap > .mm-crumbs");
+  assert.ok(nav.left - host.left < 40 && host.bottom - nav.bottom < 40, `crumbs at the bottom left (${JSON.stringify(nav)})`);
+  const crumbs = () => page.eval(`[...document.querySelectorAll('#host .mm-crumbs button')].map((b) => [b.textContent, b.getAttribute("aria-current")])`);
+  assert.deepEqual(await crumbs(), [["Root", null], ["Alpha", null], ["Alpha one", "true"]]);
+  let b = await box("#host .mm-crumbs button:nth-of-type(2)");
+  await page.click(b.x, b.y);
+  assert.equal(await page.eval("mm.getState().focus"), "a");
+  assert.deepEqual(await crumbs(), [["Root", null], ["Alpha", "true"]]);
+  b = await box("#host .mm-crumbs button");
+  await page.click(b.x, b.y);
+  assert.equal(await page.eval("mm.getState().focus"), null);
+  assert.equal(await page.eval("document.querySelectorAll('#host .mm-crumbs').length"), 0, "no crumbs without a focused branch");
+  assert.equal(await page.eval("document.querySelectorAll('#host .mm-node').length"), 6);
+});
+
+t("setData keeps selection, collapsed nodes and viewport by id; drops what is gone", async () => {
+  await make({ mode: "select" });
+  await ev(`mm.select("b"); mm.collapse("a");`);
+  await page.wheel(500, 400, 0, 120);
+  await settle();
+  const before = await page.eval("mm.getState()");
+  const next = structuredClone(SMALL);
+  next.root.children.reverse();
+  next.root.children.push({ id: "d", title: "Delta" });
+  const r = await ev(`const res = mm.setData(${JSON.stringify(next)}); return { res: res.ok, st: mm.getState(), drawn: document.querySelectorAll("#host .mm-node").length };`);
+  assert.equal(r.res, true);
+  assert.equal(r.st.selected, "b");
+  assert.deepEqual(r.st.collapsed, ["a"]);
+  assert.deepEqual(r.st.viewport, before.viewport);
+  assert.equal(r.drawn, 5, "r, c, b, a (collapsed), d");
+  const gone = structuredClone(SMALL);
+  gone.root.children = gone.root.children.filter((c) => c.id !== "b" && c.id !== "a");
+  delete gone.links;
+  const g = await ev(`mm.setData(${JSON.stringify(gone)}); return mm.getState();`);
+  assert.equal(g.selected, null);
+  assert.deepEqual(g.collapsed, []);
+});
+
+t("collapseDepth: branches at that depth and deeper open collapsed", async () => {
+  const r = await ev(`
+    make({ data: ${JSON.stringify(SMALL)}, collapseDepth: 1 });
+    const one = { c: mm.getState().collapsed, n: document.querySelectorAll("#host .mm-node").length };
+    make({ data: ${JSON.stringify(SMALL)}, collapseDepth: 0 });
+    const zero = { c: mm.getState().collapsed.sort(), n: document.querySelectorAll("#host .mm-node").length };
+    make({ data: ${JSON.stringify(SMALL)} });
+    const none = { c: mm.getState().collapsed, n: document.querySelectorAll("#host .mm-node").length };
+    return { one, zero, none };`);
+  assert.deepEqual(r.one, { c: ["a"], n: 4 });
+  assert.deepEqual(r.zero, { c: ["a", "r"], n: 1 });
+  assert.deepEqual(r.none, { c: [], n: 6 });
+});
+
+t("theming: --mm-* set on an ancestor or on .simple-mindmap wins, also under OS dark; SVG export uses it", async () => {
+  try {
+    const r = await ev(`
+      const st = document.createElement("style"); st.id = "host-theme";
+      st.textContent = "#host { --mm-bg: #123456; --mm-node-bg: #abcdef; }";
+      document.head.appendChild(st);
+      make({ data: ${JSON.stringify(SMALL)} });
+      const w = document.querySelector("#host .simple-mindmap");
+      const first = document.head.firstElementChild.id;
+      const out = { first, bg: getComputedStyle(w).backgroundColor, box: getComputedStyle(document.querySelector('#host [data-id="b"] .mm-box')).fill, svg: mm.export("svg") };
+      out.svgBg = out.svg.includes("#123456"); out.svgNode = out.svg.includes("#abcdef"); delete out.svg;
+      return out;`);
+    assert.deepEqual(r, { first: "simple-mindmap-css", bg: "rgb(18, 52, 86)", box: "rgb(171, 205, 239)", svgBg: true, svgNode: true });
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
+    const d = await ev(`
+      const w = document.querySelector("#host .simple-mindmap");
+      const anc = getComputedStyle(w).backgroundColor;
+      document.getElementById("host-theme").textContent = ".simple-mindmap { --mm-bg: #654321; }";
+      const el = getComputedStyle(w).backgroundColor;
+      document.getElementById("host-theme").textContent = "";
+      const def = getComputedStyle(w).backgroundColor;
+      return { anc, el, def };`);
+    assert.deepEqual(d, { anc: "rgb(18, 52, 86)", el: "rgb(101, 67, 33)", def: "rgb(13, 17, 23)" }, "host values beat the dark palette; without them the dark default applies");
+  } finally {
+    await page.send("Emulation.setEmulatedMedia", { features: [] });
+    await ev(`const s = document.getElementById("host-theme"); if (s) s.remove();`);
+  }
 });

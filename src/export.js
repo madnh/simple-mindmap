@@ -18,7 +18,9 @@ export function toOutline(json) {
       for (const line of n.note.replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n")) {
         if (!line.trim()) { out.push(""); continue; }
         const body = line.replace(/^\s*/, (ws) => ws.replace(/\t/g, "    "));
-        out.push(`${pad}  ${BULLET.test(body.trimStart()) ? body.replace(/^(\s*)/, "$1\\") : body}`);
+        // A note line that looks like a bullet, or already starts with a backslash, gets one more backslash in front.
+        const t = body.trimStart();
+        out.push(`${pad}  ${BULLET.test(t) || t.startsWith("\\") ? body.replace(/^(\s*)/, "$1\\") : body}`);
       }
     }
     for (const c of n.children || []) rec(c, depth + 1);
@@ -66,7 +68,7 @@ export function fromOutline(md, opts = {}) {
     if (last && indent > last.indent) {
       const cut = Math.min(indent, last.indent + 2);
       let text = line.slice(cut);
-      text = text.replace(/^(\s*)\\([-*+]\s)/, "$1$2");
+      text = text.replace(/^(\s*)\\(?=\\|[-*+]\s)/, "$1");
       last.noteLines.push(text);
     }
   }

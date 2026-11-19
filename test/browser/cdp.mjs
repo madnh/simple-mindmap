@@ -60,6 +60,7 @@ export async function launch() {
 
   const page = {
     console: consoleLines,
+    send, // raw DevTools command, e.g. Emulation.setEmulatedMedia
     async goto(url) {
       const loaded = new Promise((r) => { const h = (m) => { if (m.method === "Page.loadEventFired") { handlers.splice(handlers.indexOf(h), 1); r(); } }; handlers.push(h); });
       await send("Page.navigate", { url });

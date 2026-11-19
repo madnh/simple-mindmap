@@ -42,3 +42,10 @@ test("invalid data exports nothing", () => {
   assert.equal(toOutline({ root: {} }), null);
   assert.equal(toMermaid("nope"), null);
 });
+
+test("note lines that start with a backslash or look like bullets survive the outline round trip (golden)", () => {
+  const src = JSON.parse(read("golden/escapes.json"));
+  const md = toOutline(src);
+  assert.equal(md, read("golden/escapes.outline.md"));
+  assert.equal(fromOutline(md).root.note, src.root.note);
+});

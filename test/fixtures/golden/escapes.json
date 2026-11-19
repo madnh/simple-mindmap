@@ -1,0 +1,8 @@
+{
+  "mindmap": 1,
+  "root": {
+    "id": "root",
+    "title": "Escapes",
+    "note": "- looks like a bullet\n\\- already escaped once\n\\\\ two backslashes\n\\plain backslash\n  * indented star\nnormal line"
+  }
+}

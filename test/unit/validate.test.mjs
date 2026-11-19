@@ -104,3 +104,12 @@ test("pathOf gives the position number", () => {
 test("a JSON string is accepted", () => {
   assert.equal(validate(JSON.stringify(base())).ok, true);
 });
+
+test("links must name explicit ids: a position id is bad_link", () => {
+  const d = { root: { title: "R", children: [{ title: "x" }, { title: "y" }, { title: "z" }] }, links: [{ from: "2", to: "3", type: "blocks" }] };
+  const r = validate(d);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.errors.map((e) => [e.path, e.code]), [["links[0].from", "bad_link"], ["links[0].to", "bad_link"]]);
+  d.root.children[1].id = "y"; d.root.children[2].id = "z"; d.links = [{ from: "y", to: "z" }];
+  assert.equal(validate(d).ok, true);
+});

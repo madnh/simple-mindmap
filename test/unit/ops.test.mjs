@@ -114,3 +114,43 @@ test("nodes without id are addressed by path; sequential semantics", () => {
   ]));
   assert.deepEqual(d.root.children.map((c) => c.title), ["w", "x!", "y"]);
 });
+
+test("links name nodes by explicit id: a position id is bad_link (link op)", () => {
+  const anon = { root: { id: "r", title: "R", children: [{ title: "x" }, { id: "y", title: "y" }] } };
+  const r = applyOps(anon, [{ op: "link", from: "1", to: "y" }]);
+  assert.equal(r.ok, false);
+  assert.deepEqual([r.index, r.errors[0].code, r.errors[0].path], [0, "bad_link", "ops[0].from"]);
+  ok(applyOps(anon, [{ op: "link", from: "y", to: "r" }]));
+});
+
+test("applyOps never throws: values JSON cannot hold are bad_op / bad_meta at ops[i]", () => {
+  const cyc = { title: "c" }; cyc.children = [cyc];
+  let r = applyOps(tree(), [{ op: "edit", id: "a", title: "ok" }, { op: "add", parent: "r", node: cyc }]);
+  assert.deepEqual([r.ok, r.index, r.errors[0].code, r.errors[0].path], [false, 1, "bad_op", "ops[1].node"]);
+  r = applyOps(tree(), [{ op: "meta", id: "b", meta: { x: 1n } }]);
+  assert.deepEqual([r.ok, r.index, r.errors[0].code, r.errors[0].path], [false, 0, "bad_meta", "ops[0].meta"]);
+  const evil = { op: "edit", id: "a" };
+  Object.defineProperty(evil, "title", { enumerable: true, get() { throw new Error("boom"); } });
+  r = applyOps(tree(), [evil]);
+  assert.deepEqual([r.ok, r.index, r.errors[0].code, r.errors[0].path], [false, 0, "bad_op", "ops[0]"]);
+});
+
+test("move: 'after' is read against the tree as it was before the move", () => {
+  const anon = { root: { title: "R", children: [{ title: "a" }, { title: "b" }, { title: "c" }] } };
+  const d = ok(applyOps(anon, [{ op: "move", id: "1", parent: "0", after: "3" }]));
+  assert.deepEqual(kids(d.root), ["b", "c", "a"]);
+  assert.equal(applyOps(anon, [{ op: "move", id: "1", parent: "0", after: "1" }]).errors[0].code, "move_into_self");
+});
+
+test("per-op field checks name the op: status.to, edit title / tone / note, link label", () => {
+  const one = (op) => { const r = applyOps(tree(), [{ op: "edit", id: "a", title: "fine" }, op]); return [r.ok, r.index, r.errors[0].code, r.errors[0].path]; };
+  assert.deepEqual(one({ op: "status", id: "a", to: "zzz" }), [false, 1, "bad_status", "ops[1].to"]);
+  assert.deepEqual(one({ op: "edit", id: "a", title: "" }), [false, 1, "missing_title", "ops[1].title"]);
+  assert.deepEqual(one({ op: "edit", id: "a", title: "x".repeat(201) }), [false, 1, "text_too_long", "ops[1].title"]);
+  assert.deepEqual(one({ op: "edit", id: "c", tone: "pink" }), [false, 1, "bad_tone", "ops[1].tone"]);
+  assert.deepEqual(one({ op: "edit", id: "c", note: 5 }), [false, 1, "text_too_long", "ops[1].note"]);
+  assert.deepEqual(one({ op: "link", from: "a", to: "b", label: "l".repeat(61) }), [false, 1, "text_too_long", "ops[1].label"]);
+  const custom = applyOps(tree(), [{ op: "status", id: "a", to: "mine" }], { statuses: ["open", "mine"] });
+  assert.equal(custom.ok, true, "custom statuses are honoured by the per-op check");
+  ok(applyOps(tree(), [{ op: "edit", id: "a", title: "x".repeat(200) }]));
+});

@@ -1,5 +1,5 @@
 // Operations on mindmap data (section 4.1b). Pure: never mutates its input.
-import { validate, indexTree, clone, LINK_TYPES } from "./model.js";
+import { validate, indexTree, clone, LINK_TYPES, TONES, DEFAULT_LIMITS, statusKeys, oneLine, graphemes, bytes } from "./model.js";
 
 export const DATA_OPS = ["add", "edit", "status", "move", "remove", "link", "unlink", "meta"];
 export const VIEW_OPS = ["collapse", "expand", "select", "focus"];
@@ -14,13 +14,24 @@ function need(idx, id, field = "id") {
   return idx.get(id);
 }
 
+// Copies a payload; a value JSON cannot hold (BigInt, cycle, throwing getter) is an op error, not a throw.
+function copy(v, code, what, field) {
+  try { return clone(v); } catch { return fail(code, `${what} is not plain JSON data`, { field }); }
+}
+
+// Per-op checks of single fields, so the error names the op (the final validate stays as a backstop).
+function checkTitle(v, rules, field = "title") {
+  if (typeof v !== "string" || oneLine(v) === "") fail("missing_title", "Title must be a non-empty string", { field });
+  if (graphemes(oneLine(v)).length > rules.limits.title) fail("text_too_long", `Title is longer than ${rules.limits.title} characters`, { field, limit: rules.limits.title });
+}
+
 function insert(parent, node, op, idx, field) {
   const list = parent.children || (parent.children = []);
   if (op.first) list.unshift(node);
   else if (op.after !== undefined && op.after !== null) {
-    const sib = need(idx, op.after, "after");
+    const sib = isObj(op.after) ? op.after : need(idx, op.after, "after");
     const at = list.indexOf(sib.node);
-    if (at < 0) fail("no_such_node", `"${op.after}" is not a child of "${op[field]}"`, { field: "after", id: op.after });
+    if (at < 0) fail("no_such_node", `"${sib.id}" is not a child of the target parent`, { field: "after", id: sib.id });
     list.splice(at + 1, 0, node);
   } else list.push(node);
 }
@@ -40,7 +51,7 @@ function subtreeIds(entry, idx) {
   return out;
 }
 
-function applyOne(data, op, cache) {
+function applyOne(data, op, cache, rules) {
   if (!isObj(op)) fail("bad_op", "Operation must be an object");
   if (!cache.idx) cache.idx = indexTree(data);
   const idx = cache.idx;
@@ -49,11 +60,17 @@ function applyOne(data, op, cache) {
     case "add": {
       const parent = need(idx, op.parent, "parent");
       if (!isObj(op.node)) fail("bad_op", "add needs a node object");
-      insert(parent.node, clone(op.node), op, idx, "parent");
+      insert(parent.node, copy(op.node, "bad_op", "node", "node"), op, idx, "parent");
       return null;
     }
     case "edit": {
       const e = need(idx, op.id);
+      if ("title" in op) checkTitle(op.title, rules);
+      if ("tone" in op && op.tone !== null && !TONES.includes(op.tone)) fail("bad_tone", `Unknown tone ${JSON.stringify(op.tone)}`, { field: "tone", id: op.id });
+      if ("note" in op && op.note !== null) {
+        if (typeof op.note !== "string") fail("text_too_long", "Note must be a string", { field: "note", id: op.id });
+        if (bytes(op.note) > rules.limits.note) fail("text_too_long", `Note is larger than ${rules.limits.note} bytes`, { field: "note", id: op.id, limit: rules.limits.note });
+      }
       for (const k of ["title", "note", "tone"]) {
         if (!(k in op)) continue;
         if (op[k] === null && k !== "title") delete e.node[k]; else e.node[k] = op[k];
@@ -64,6 +81,7 @@ function applyOne(data, op, cache) {
     case "status": {
       const e = need(idx, op.id);
       if (!("to" in op)) fail("bad_op", "status needs a 'to' value");
+      if (op.to !== null && (typeof op.to !== "string" || !rules.statuses.has(op.to))) fail("bad_status", `Unknown status ${JSON.stringify(op.to)}`, { field: "to", id: op.id });
       if (op.to === null) delete e.node.status; else { e.node.status = op.to; delete e.node.tone; }
       return null;
     }
@@ -73,8 +91,11 @@ function applyOne(data, op, cache) {
       if (!e.parent) fail("bad_op", "The root cannot be moved");
       if (subtreeIds(e, idx).has(target.id)) fail("move_into_self", `Cannot move "${op.id}" into itself or its descendants`, { id: op.id });
       if (op.after === op.id) fail("move_into_self", "A node cannot be placed after itself", { id: op.id });
+      // "after" is resolved against the tree as it was when the op started (path ids shift on detach).
+      const sib = op.after !== undefined && op.after !== null && !op.first ? need(idx, op.after, "after") : null;
+      if (sib && sib.node === e.node) fail("move_into_self", "A node cannot be placed after itself", { id: op.id });
       detach(e);
-      insert(target.node, e.node, op, indexTree(data), "parent");
+      insert(target.node, e.node, sib ? { after: sib } : op, null, "parent");
       return null;
     }
     case "remove": {
@@ -90,7 +111,13 @@ function applyOne(data, op, cache) {
       return null;
     }
     case "link": {
-      need(idx, op.from, "from"); need(idx, op.to, "to");
+      for (const end of ["from", "to"]) {
+        if (need(idx, op[end], end).node.id !== op[end]) fail("bad_link", `Link ${end} "${op[end]}" is a position, not a node id; give the node an id`, { field: end, id: op[end] });
+      }
+      if (op.label !== undefined && op.label !== null) {
+        if (typeof op.label !== "string") fail("text_too_long", "Link label must be a string", { field: "label" });
+        if (graphemes(oneLine(op.label)).length > rules.limits.label) fail("text_too_long", `Link label is longer than ${rules.limits.label} characters`, { field: "label", limit: rules.limits.label });
+      }
       const type = op.type === undefined ? "relates" : op.type;
       if (!LINK_TYPES.includes(type)) fail("bad_link", `Unknown link type ${JSON.stringify(op.type)}`);
       const links = data.links || (data.links = []);
@@ -110,7 +137,7 @@ function applyOne(data, op, cache) {
       const e = need(idx, op.id);
       if (!isObj(op.meta)) fail("bad_meta", "meta must be an object", { id: op.id });
       const m = { ...(e.node.meta || {}) };
-      for (const [k, v] of Object.entries(op.meta)) { if (v === null) delete m[k]; else m[k] = clone(v); }
+      for (const [k, v] of Object.entries(op.meta)) { if (v === null) delete m[k]; else m[k] = copy(v, "bad_meta", `meta.${k}`, "meta"); }
       if (Object.keys(m).length) e.node.meta = m; else delete e.node.meta;
       return null;
     }
@@ -134,12 +161,14 @@ export function applyOps(json, ops, opts = {}) {
   const data = clone(before.data);
   const view = [];
   const cache = { idx: null };
+  const rules = { limits: { ...DEFAULT_LIMITS, ...(opts.limits || {}) }, statuses: statusKeys(opts.statuses) };
   for (let i = 0; i < ops.length; i++) {
     try {
-      const v = applyOne(data, ops[i], cache);
+      const v = applyOne(data, ops[i], cache, rules);
       if (v) view.push(v);
     } catch (e) {
-      if (!(e instanceof OpError)) throw e;
+      // Never throw to the host: anything unexpected becomes bad_op at this op.
+      if (!(e instanceof OpError)) return { ok: false, index: i, errors: [{ path: `ops[${i}]`, code: "bad_op", message: `Operation failed: ${e && e.message ? e.message : String(e)}` }] };
       const extra = { ...(e.extra || {}) };
       const field = extra.field; delete extra.field;
       if (extra.id === undefined) delete extra.id;

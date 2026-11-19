@@ -7,7 +7,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 export function specToDom(doc, spec) {
   const node = doc.createElementNS(SVG_NS, spec.t);
   for (const [k, v] of Object.entries(spec.a || {})) if (v !== undefined && v !== null) node.setAttribute(k, String(v));
-  for (const [k, v] of Object.entries(spec.p || {})) node.style.setProperty(k, v.tok ? `var(--mm-${v.tok})` : v.raw);
+  for (const [k, v] of Object.entries(spec.p || {})) node.style.setProperty(k, v.tok ? `var(--mm-${v.tok}, var(--mmd-${v.tok}))` : v.raw);
   if (spec.c) node.setAttribute("class", spec.c);
   if (spec.x !== undefined) node.textContent = spec.x;
   for (const c of spec.k || []) node.appendChild(specToDom(doc, c));
