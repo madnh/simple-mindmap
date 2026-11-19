@@ -9,8 +9,8 @@
   --mmd-link-blocks: #cf222e; --mmd-link-supersedes: #6e7781; --mmd-link-relates: #8c959f;
   --mmd-edge-0: #4c8bf5; --mmd-edge-1: #e8710a; --mmd-edge-2: #1e8e3e; --mmd-edge-3: #a142f4;
   --mmd-edge-4: #d93025; --mmd-edge-5: #12a4af; --mmd-edge-6: #c26401; --mmd-edge-7: #5f6368;
-  --mmd-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mmd-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --mmd-font: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif;
+  --mmd-mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 :where(.simple-mindmap[data-theme="dark"]) {
   --mmd-bg: #0d1117; --mmd-text: #e6edf3; --mmd-muted: #8b949e; --mmd-node-bg: #161b22; --mmd-node-border: #30363d;

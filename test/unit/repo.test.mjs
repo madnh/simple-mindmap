@@ -59,3 +59,24 @@ test("src/mindmap.css and the CSS injected by src/mindmap.js are identical", () 
   const out = execFileSync(process.execPath, [ROOT + "test/tools/sync-css.mjs", "--check"], { encoding: "utf8" });
   assert.match(out, /css in sync/);
 });
+
+// Font stacks: only the system fonts every host may show without shipping or downloading anything. A value is either
+// exactly one of these two lists or a var(...) reference / CSS-wide keyword.
+const SANS = '-apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif';
+const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
+test("src: font stacks are exactly the system font lists (CSS, the CSS string in mindmap.js, JS constants)", () => {
+  const found = [];
+  for (const [p, raw] of SRC) {
+    const text = raw.replace(/\\"/g, '"'); // the CSS inside mindmap.js is a JSON string
+    const take = (re, group) => { for (const m of text.matchAll(re)) found.push([p, m[group].trim()]); };
+    take(/font-family\s*:\s*([^;}\n]+)/g, 1);
+    take(/--[\w-]*(?:font|mono)[\w-]*\s*:\s*([^;}\n]+)/g, 1);
+    take(/\b(?:FONT|MONO)\s*=\s*(['"`])(.*?)\1/g, 2);
+    take(/"font-family"\s*:\s*(['"`])(.*?)\1/g, 2);
+  }
+  const lists = found.filter(([, v]) => !/^var\(/.test(v) && !/^(inherit|initial|unset|revert)$/.test(v));
+  const bad = lists.filter(([, v]) => v !== SANS && v !== MONO);
+  assert.deepEqual(bad, [], "font values outside the system lists");
+  // svg.js FONT + MONO, mindmap.css --mmd-font + --mmd-mono, and the same two inside mindmap.js: a scan that finds fewer is broken.
+  assert.ok(lists.length >= 6, `only ${lists.length} font lists found: ${JSON.stringify(lists)}`);
+});

@@ -4,8 +4,8 @@
 import { validate, indexTree, graphemes } from "./model.js";
 import { layout, GEOM } from "./layout.js";
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-export const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+export const FONT = '-apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif';
+export const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
 export const FONT_SIZE = { node: 13, root: 15, num: 11, small: 11 };
 
 export const THEME = Object.freeze({

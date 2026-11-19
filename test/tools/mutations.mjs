@@ -157,6 +157,8 @@ export const MUTATIONS = [
   { id: "M72", what: "demo server: path segments not checked", suite: "unit", expect: "demo server: encoded traversal",
     edits: [["demo/serve.mjs", '|| p.startsWith(".") || p.includes("\\0")', ""]] },
   // ---- repository rules ----
+  { id: "M73", what: "a font outside the system lists (Arial) in the default stack", suite: "unit", expect: "src: font stacks are exactly",
+    edits: [["src/svg.js", "\"Helvetica Neue\", sans-serif';", "\"Helvetica Neue\", Arial, sans-serif';"]] },
   { id: "M39", what: "CSS file edited without syncing", suite: "unit", expect: "src/mindmap.css and the CSS injected",
     edits: [["src/mindmap.css", ".simple-mindmap .mm-error { padding: 16px; }", ".simple-mindmap .mm-error { padding: 17px; }"]] },
   { id: "M40", what: "an HTML-string API in src", suite: "unit", expect: "src: no HTML-string APIs",

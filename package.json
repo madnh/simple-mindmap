@@ -1,6 +1,6 @@
 {
   "name": "simple-mindmap",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A small, dependency-free mindmap and outline view for the browser: render from JSON, update with operations, listen to events.",
   "type": "module",
   "license": "MIT",

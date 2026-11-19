@@ -3,6 +3,11 @@
 All notable changes to this project are documented here. The project follows [Semantic Versioning](https://semver.org/);
 the API, operations, events and error codes described in the README are the 1.x contract.
 
+## 1.0.1
+
+- The default font stacks use system fonts only: `-apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif` and
+  `ui-monospace, "SF Mono", Menlo, monospace` (`--mm-font` / `--mm-mono` defaults and the exported SVG). A repository test keeps it so.
+
 ## 1.0.0
 
 First release.
