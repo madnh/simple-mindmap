@@ -151,6 +151,11 @@ export const MUTATIONS = [
     edits: [["src/mindmap.js", "children: kidIds(id), node: publicNode(e.node, id) };", "children: kidIds(id), node: e.node };"]] },
   { id: "M70", what: "getNode shares meta with the data", suite: "browser", expect: "getNode() returns a copy",
     edits: [["src/mindmap.js", "if (n.meta) out.meta = clone(n.meta);", "if (n.meta) out.meta = n.meta;"]] },
+  // ---- demo server (T78) ----
+  { id: "M71", what: "demo server: real path not checked against the root", suite: "unit", expect: "demo server: encoded traversal",
+    edits: [["demo/serve.mjs", "  if (!real.startsWith(base + sep)) return null;\n", ""]] },
+  { id: "M72", what: "demo server: path segments not checked", suite: "unit", expect: "demo server: encoded traversal",
+    edits: [["demo/serve.mjs", '|| p.startsWith(".") || p.includes("\\0")', ""]] },
   // ---- repository rules ----
   { id: "M39", what: "CSS file edited without syncing", suite: "unit", expect: "src/mindmap.css and the CSS injected",
     edits: [["src/mindmap.css", ".simple-mindmap .mm-error { padding: 16px; }", ".simple-mindmap .mm-error { padding: 17px; }"]] },
