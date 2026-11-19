@@ -130,6 +130,8 @@ const mm = createMindmap(el, {
 Pure functions (`simple-mindmap/core`, no DOM): `validate(json, {limits, statuses})`, `applyOps(json, ops, {limits, statuses})`
 (`{ok: true, data, view, warnings}` or `{ok: false, errors, index}`; the input is never changed), `toOutline(json)`,
 `toMermaid(json)`, `fromOutline(markdown, {rootTitle})`, `pathOf(json, id)`.
+In an outline, note lines follow Markdown backslash escaping: `toOutline` puts a `\` in front of a note line that looks
+like a bullet or already starts with `\`, and `fromOutline` reads `\-` as `-` and `\\` as `\` at the start of a note line.
 
 Functions that measure text (browser only, also exported from `simple-mindmap`): `layout(data, {view, collapsed, focus,
 measure, badge})` and `toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected, filter})`.
