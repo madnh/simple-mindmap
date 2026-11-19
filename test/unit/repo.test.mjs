@@ -80,3 +80,57 @@ test("src: font stacks are exactly the system font lists (CSS, the CSS string in
   // svg.js FONT + MONO, mindmap.css --mmd-font + --mmd-mono, and the same two inside mindmap.js: a scan that finds fewer is broken.
   assert.ok(lists.length >= 6, `only ${lists.length} font lists found: ${JSON.stringify(lists)}`);
 });
+
+// The structured scan above reads font-family, --*font* variables and the FONT/MONO constants. These two read what it
+// does not: the `font:` shorthand, `fontFamily =` / `.font =` assignments, and any font name left anywhere in src once
+// the two allowed lists are cut out.
+const KEYWORD = /^(inherit|initial|unset|revert)$/;
+const BANNED = ["Arial", "Helvetica", "Roboto", "Inter", "Segoe", "Ubuntu", "Cantarell", "Noto", "Oxygen", "Open Sans",
+  "Fira", "Source Sans", "Source Code", "Lato", "Montserrat", "Times", "Georgia", "Verdana", "Tahoma", "Trebuchet",
+  "Lucida", "Courier", "Consolas", "Monaco", "Menlo", "SF Mono", "SF Pro", "San Francisco", "DejaVu", "Liberation",
+  "JetBrains", "Cascadia", "Comic Sans", "Impact", "PingFang", "Hiragino", "Meiryo", "Apple Color Emoji"];
+test("src: font shorthands and font assignments use only the system lists", () => {
+  const bad = [];
+  let seen = 0;
+  for (const [p, raw] of SRC) {
+    const text = raw.replace(/\\"/g, '"');
+    // CSS `font:` shorthand: a CSS-wide keyword, or a value whose family part (the end) is var(...) or an allowed list.
+    for (const m of text.matchAll(/(?<![\w-])font\s*:\s*([^;}\n]+)/g)) {
+      const v = m[1].trim(); seen++;
+      if (!(KEYWORD.test(v) || /var\([^)]*\)\)?$/.test(v) || v.endsWith(SANS) || v.endsWith(MONO))) bad.push([p, m[0]]);
+    }
+    // el.style.fontFamily = "…"
+    for (const m of text.matchAll(/\bfontFamily\s*=\s*(['"`])(.*?)\1/g)) {
+      const v = m[2].trim(); seen++;
+      if (!(/^var\(/.test(v) || KEYWORD.test(v) || v === SANS || v === MONO)) bad.push([p, m[0]]);
+    }
+    // canvas ctx.font = `…px ${FONT}`: the literal part names no family, the interpolations name only FONT / MONO.
+    for (const m of text.matchAll(/\.font\s*=\s*`([^`]*)`/g)) {
+      seen++;
+      const lits = m[1].replace(/\$\{[^}]*\}/g, " ").trim();
+      const exprs = [...m[1].matchAll(/\$\{([^}]*)\}/g)].map((x) => x[1]);
+      const famExpr = exprs.at(-1) || "";
+      const idents = famExpr.replace(/(['"]).*?\1/g, "").match(/\b[A-Z][A-Z_]*\b/g) || [];
+      if (!/^[\d\s]*px$/.test(lits.replace(/\s+/g, " ").replace(/ px$/, "px")) || !idents.length || idents.some((i) => i !== "FONT" && i !== "MONO") || /['"]/.test(famExpr.replace(/[!=]==\s*(['"]).*?\1/g, "")) || !m[1].trimEnd().endsWith("}")) bad.push([p, m[0]]);
+    }
+    for (const m of text.matchAll(/\.font\s*=\s*(['"])(.*?)\1/g)) { seen++; bad.push([p, m[0]]); } // a canvas font never written as a fixed string
+  }
+  assert.deepEqual(bad, [], "font shorthands / assignments outside the system lists");
+  // mindmap.css has 4 `font: inherit` and mindmap.js carries the same 4 plus fontFamily and ctx2d.font: fewer is a broken scan.
+  assert.ok(seen >= 10, `only ${seen} font shorthands / assignments found`);
+});
+
+test("src: no font name outside the two allowed lists, anywhere in src", () => {
+  const bad = [];
+  for (const [p, raw] of SRC) {
+    const text = raw.replace(/\\"/g, '"').split(SANS).join(" ").split(MONO).join(" ");
+    for (const name of BANNED) {
+      const re = new RegExp(`(?<![\\w-])${name.replace(/ /g, "\\s+")}(?![\\w-])`, "g");
+      for (const m of text.matchAll(re)) bad.push([p, m[0], text.slice(Math.max(0, m.index - 30), m.index + 30).replace(/\s+/g, " ")]);
+    }
+  }
+  assert.deepEqual(bad, [], "font names outside the system lists");
+  // the cut must have happened, or the scan read nothing: svg.js FONT and MONO, mindmap.css and mindmap.js once each.
+  const cuts = SRC.reduce((n, [, raw]) => n + raw.replace(/\\"/g, '"').split(SANS).length - 1 + raw.replace(/\\"/g, '"').split(MONO).length - 1, 0);
+  assert.ok(cuts >= 6, `only ${cuts} allowed lists cut out of src`);
+});

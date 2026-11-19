@@ -3,6 +3,11 @@
 All notable changes to this project are documented here. The project follows [Semantic Versioning](https://semver.org/);
 the API, operations, events and error codes described in the README are the 1.x contract.
 
+## 1.0.2
+
+- Tests only, no runtime change. The repository font test also reads the `font:` shorthand, `fontFamily =` and canvas
+  `.font =` assignments, and fails on any common font name left in `src/` outside the two system lists.
+
 ## 1.0.1
 
 - The default font stacks use system fonts only: `-apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", sans-serif` and

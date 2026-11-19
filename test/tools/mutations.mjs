@@ -159,6 +159,13 @@ export const MUTATIONS = [
   // ---- repository rules ----
   { id: "M73", what: "a font outside the system lists (Arial) in the default stack", suite: "unit", expect: "src: font stacks are exactly",
     edits: [["src/svg.js", "\"Helvetica Neue\", sans-serif';", "\"Helvetica Neue\", Arial, sans-serif';"]] },
+  { id: "M74", what: "a font shorthand naming a family outside the lists (CSS and the CSS in mindmap.js)", suite: "unit", expect: "src: font shorthands and font assignments",
+    edits: [["src/mindmap.css", "font: inherit; font-size: 12px; line-height: 1.2;", "font: 12px Avenir; font-size: 12px; line-height: 1.2;"],
+            ["src/mindmap.js", "font: inherit; font-size: 12px; line-height: 1.2;", "font: 12px Avenir; font-size: 12px; line-height: 1.2;"]] },
+  { id: "M75", what: "the canvas measuring font names its own family", suite: "unit", expect: "src: font shorthands and font assignments",
+    edits: [["src/mindmap.js", '${kind === "num" ? MONO : FONT}`;', '${kind === "num" ? MONO : "Avenir"}`;']] },
+  { id: "M76", what: "a banned font name in a fontFamily assignment", suite: "unit", expect: "src: no font name outside the two allowed lists",
+    edits: [["src/mindmap.js", 'svg.style.fontFamily = "var(--mm-font, var(--mmd-font))";', 'svg.style.fontFamily = "var(--mm-font, Arial)";']] },
   { id: "M39", what: "CSS file edited without syncing", suite: "unit", expect: "src/mindmap.css and the CSS injected",
     edits: [["src/mindmap.css", ".simple-mindmap .mm-error { padding: 16px; }", ".simple-mindmap .mm-error { padding: 17px; }"]] },
   { id: "M40", what: "an HTML-string API in src", suite: "unit", expect: "src: no HTML-string APIs",
