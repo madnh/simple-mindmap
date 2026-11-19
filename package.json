@@ -1,0 +1,27 @@
+{
+  "name": "simple-mindmap",
+  "version": "1.0.0",
+  "description": "A small, dependency-free mindmap and outline view for the browser: render from JSON, update with operations, listen to events.",
+  "type": "module",
+  "license": "MIT",
+  "author": "MaDnh",
+  "repository": { "type": "git", "url": "https://github.com/madnh/simple-mindmap.git" },
+  "main": "./src/mindmap.js",
+  "exports": {
+    ".": "./src/mindmap.js",
+    "./core": "./src/core.js",
+    "./mindmap.css": "./src/mindmap.css"
+  },
+  "files": ["src", "LICENSE", "README.md", "CHANGELOG.md"],
+  "sideEffects": false,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/unit/",
+    "test:browser": "node --test --test-concurrency=1 test/browser/",
+    "test:all": "node --test --test-concurrency=1 test/unit/ test/browser/",
+    "demo": "node demo/serve.mjs",
+    "measure": "node test/tools/measure.mjs",
+    "mutate": "node test/tools/mutate.mjs",
+    "sync-css": "node test/tools/sync-css.mjs"
+  }
+}

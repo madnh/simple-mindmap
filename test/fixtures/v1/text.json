@@ -1,0 +1,46 @@
+{
+  "mindmap": 1,
+  "title": "Text handling",
+  "layout": "right",
+  "root": {
+    "id": "text",
+    "title": "Chữ tiếng Việt có dấu — đ Đ",
+    "children": [
+      {
+        "id": "html",
+        "title": "<img src=x onerror=alert(1)> & \"quotes\" 'single'"
+      },
+      {
+        "id": "emoji",
+        "title": "Emoji 👩‍👩‍👧‍👦 🇻🇳 flags and ZWJ"
+      },
+      {
+        "id": "cjk",
+        "title": "中文 日本語 한국어"
+      },
+      {
+        "id": "rtl",
+        "title": "עברית العربية"
+      },
+      {
+        "id": "ctrl",
+        "title": "Control\u0007chars\u0000stripped"
+      },
+      {
+        "id": "nfd",
+        "title": "Café (NFD input)"
+      },
+      {
+        "id": "long",
+        "title": "A long title that goes on and on past the forty-eight grapheme clip on the map"
+      }
+    ]
+  },
+  "links": [
+    {
+      "from": "html",
+      "to": "emoji",
+      "label": "<b>not bold</b>"
+    }
+  ]
+}

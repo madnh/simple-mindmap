@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>simple-mindmap demo</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px; }
+  body { margin: 0; display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #8884; }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+  #map { min-height: 0; position: relative; }
+  aside { border-left: 1px solid #8884; display: flex; flex-direction: column; min-height: 0; padding: 8px; gap: 8px; overflow: auto; }
+  aside h2 { font-size: 13px; margin: 4px 0 0; }
+  textarea { width: 100%; min-height: 110px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; box-sizing: border-box; }
+  pre { margin: 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; background: #8881; padding: 6px; border-radius: 6px; }
+  #log { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; max-height: 260px; overflow: auto; }
+  #log li { padding: 2px 0; border-bottom: 1px solid #8882; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; } aside { border-left: 0; border-top: 1px solid #8884; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>simple-mindmap</h1>
+  <label>Data <select id="sample">
+    <option value="architecture.json">Architecture (links, statuses)</option>
+    <option value="statuses-tones.json">Every status and tone</option>
+    <option value="text.json">Text handling</option>
+    <option value="large-2000.json">2 000 nodes</option>
+    <option value="invalid">Invalid data</option>
+  </select></label>
+  <label>Mode <select id="mode"><option>view</option><option selected>select</option><option>edit</option></select></label>
+  <label>Theme <select id="theme"><option value="">system</option><option>light</option><option>dark</option></select></label>
+  <label><input type="checkbox" id="autoApply" checked> apply edit intents</label>
+</header>
+<main>
+  <div id="map"></div>
+  <aside>
+    <h2>Selected</h2>
+    <pre id="selected">-</pre>
+    <h2>Apply operations (JSON array)</h2>
+    <textarea id="ops">[{ "op": "add", "parent": "root", "node": { "id": "new1", "title": "Added by apply", "status": "open" } }]</textarea>
+    <div class="row"><button id="apply" type="button">Apply</button><button id="undo" type="button">Reload data</button></div>
+    <pre id="result">-</pre>
+    <h2>Export</h2>
+    <div class="row">
+      <button type="button" data-export="json">JSON</button><button type="button" data-export="outline">Outline</button>
+      <button type="button" data-export="mermaid">Mermaid</button><button type="button" data-export="svg">SVG (download)</button>
+    </div>
+    <pre id="export">-</pre>
+    <h2>Events</h2>
+    <ul id="log"></ul>
+  </aside>
+</main>
+<script type="module">
+import { createMindmap } from "../src/mindmap.js";
+
+const $ = (id) => document.getElementById(id);
+const EVENTS = ["select", "open", "action", "toggle", "view", "viewport", "search", "intent", "invalid", "error"];
+let mm = null, seq = 0;
+
+function log(name, payload) {
+  const li = document.createElement("li");
+  li.textContent = `${name} ${JSON.stringify(payload).slice(0, 300)}`;
+  $("log").prepend(li);
+  while ($("log").childElementCount > 200) $("log").lastElementChild.remove();
+}
+
+async function load() {
+  const name = $("sample").value;
+  const data = name === "invalid"
+    ? { root: { id: "a", title: "Root", children: [{ id: "a", title: "Banner" }] } }
+    : await (await fetch(`../test/fixtures/v1/${name}`)).json();
+  const state = mm ? mm.getState() : null;
+  if (mm) mm.destroy();
+  mm = createMindmap($("map"), {
+    data, mode: $("mode").value, theme: $("theme").value || undefined,
+    state: state && name === load.last ? state : null,
+    actions: [{ id: "copy-id", label: "Copy internal id" }, { id: "log-node", label: "Log node" }],
+    badge: (n) => (n.meta && n.meta.by ? { symbol: "•", label: `changed by ${n.meta.by}` } : null),
+  });
+  load.last = name;
+  for (const e of EVENTS) mm.on(e, (p) => log(e, p));
+  mm.on("select", ({ id }) => { $("selected").textContent = JSON.stringify(mm.getNode(id), null, 2); });
+  mm.on("action", ({ action, id }) => {
+    if (action === "copy-id" && navigator.clipboard) navigator.clipboard.writeText(id).catch(() => {});
+    if (action === "log-node") log("node", mm.getNode(id));
+  });
+  mm.on("intent", (op) => {
+    if (!$("autoApply").checked) return;
+    const o = structuredClone(op);
+    if (o.op === "add" && !o.node.id) o.node.id = `new-${Date.now().toString(36)}-${++seq}`;
+    $("result").textContent = JSON.stringify(mm.apply([o]), null, 2);
+  });
+}
+
+$("sample").addEventListener("change", load);
+$("mode").addEventListener("change", load);
+$("theme").addEventListener("change", load);
+$("undo").addEventListener("click", () => { load.last = null; load(); });
+$("apply").addEventListener("click", () => {
+  let ops;
+  try { ops = JSON.parse($("ops").value); } catch (e) { $("result").textContent = "Not JSON: " + e.message; return; }
+  $("result").textContent = JSON.stringify(mm.apply(ops), null, 2);
+});
+for (const b of document.querySelectorAll("[data-export]")) {
+  b.addEventListener("click", () => {
+    const fmt = b.dataset.export;
+    const out = mm.export(fmt);
+    if (out === null) { $("export").textContent = "(no valid data)"; return; }
+    if (fmt === "svg") {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([out], { type: "image/svg+xml" }));
+      a.download = "mindmap.svg";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      $("export").textContent = `SVG: ${out.length} bytes`;
+    } else $("export").textContent = out;
+  });
+}
+load();
+</script>
+</body>
+</html>

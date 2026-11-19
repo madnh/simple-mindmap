@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>simple-mindmap browser tests</title>
+<style>html,body{margin:0;padding:0}#host{position:absolute;left:0;top:0;width:1000px;height:700px}</style></head>
+<body>
+<div id="host"></div>
+<script type="module">
+import * as SM from "../../src/mindmap.js";
+import * as CORE from "../../src/core.js";
+window.SM = SM;
+window.CORE = CORE;
+const EVENTS = ["select", "open", "action", "toggle", "view", "viewport", "search", "intent", "invalid", "error"];
+window.INTERACTION = ["select", "open", "action", "toggle", "view", "viewport", "search", "intent"];
+window.fixture = async (name) => (await fetch(`/test/fixtures/v1/${name}`)).json();
+// make(opts): a fresh component in #host; every event is recorded in window.events
+window.make = (opts) => {
+  if (window.mm) window.mm.destroy();
+  window.events = [];
+  const mm = SM.createMindmap(document.getElementById("host"), opts);
+  for (const e of EVENTS) mm.on(e, (p) => window.events.push({ e, p }));
+  window.mm = mm;
+  return mm;
+};
+window.center = (id, sel = ".mm-box") => {
+  const el = document.querySelector(`#host [data-id="${id}"] ${sel}`) || document.querySelector(`#host [data-id="${id}"]`);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+};
+window.names = () => window.events.map((x) => x.e);
+window.ready = true;
+</script>
+</body>
+</html>

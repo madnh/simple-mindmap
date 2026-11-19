@@ -1,0 +1,307 @@
+# simple-mindmap
+
+A small mindmap and outline view for the browser. You pass JSON, update it with operations, and listen to events.
+Pure ES modules, **zero runtime dependencies**, no network access, no `innerHTML`, system fonts only, colours through
+CSS variables, and every visible string can be replaced.
+
+- Three views: **both sides** (the root in the middle), **tree to the right**, and **outline** (nested rows).
+- Three modes: `view` (read only), `select` (select, open, menu actions), `edit` (emits `intent`; you decide and call `apply`).
+- The data stays yours: the component never edits your data by itself.
+- One validation function used by every entry point, with fixed error codes you can translate.
+- Static SVG export, Markdown outline and Mermaid export, and Markdown outline import.
+
+## Quick start
+
+```html
+<div id="map" style="height: 480px"></div>
+<script type="module">
+  import { createMindmap } from "./simple-mindmap/src/mindmap.js";
+
+  const mm = createMindmap(document.getElementById("map"), {
+    data: {
+      mindmap: 1,
+      title: "Release plan",
+      root: { id: "root", title: "Release 1.0", children: [
+        { id: "lib", title: "Library", status: "decided" },
+        { id: "docs", title: "Docs", status: "pending" },
+      ] },
+    },
+    mode: "select",
+  });
+  mm.on("select", ({ id }) => console.log("selected", mm.getNode(id)));
+</script>
+```
+
+Code that has no DOM (a server, a worker, a CLI) imports the pure part:
+
+```js
+import { validate, applyOps, toOutline, toMermaid, fromOutline, pathOf } from "simple-mindmap/core";
+```
+
+## Data format
+
+```json
+{
+  "mindmap": 1,
+  "title": "Notification architecture",
+  "layout": "both",
+  "root": {
+    "id": "root", "title": "Notifications", "note": "Short Markdown...",
+    "children": [
+      { "id": "pane", "title": "Pane notifications", "status": "decided", "children": [] },
+      { "id": "plugin", "title": "Plugin notifications", "tone": "amber", "collapsed": true }
+    ]
+  },
+  "links": [ { "from": "plugin", "to": "pane", "type": "relates", "label": "shared profile" } ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `mindmap` | format version; absent means 1; anything else is `bad_version` |
+| `title` | optional map title, one line, at most 200 graphemes |
+| `layout` | the view to open with: `both` (default), `right` or `outline` |
+| `root` | required; a node |
+| node `title` | required, one line, 1 to 200 graphemes (control characters are removed) |
+| node `id` | optional; `^[A-Za-z0-9_-]{1,64}$` with at least one letter; unique. A node without `id` is addressed by its position path (`"1.2.3"`; the root is `"0"`) |
+| node `note` | optional Markdown, at most 16 KiB, kept verbatim. **The component never draws notes**: draw them yourself, in your own sandbox |
+| node `status` | one of the configured statuses (default: `open`, `pending`, `decided`, `parked`, `blocked`, `superseded`) |
+| node `tone` | `green`, `amber`, `red`, `blue`, `purple` or `grey`; a colour dot when there is no status (ignored, with a warning, when `status` is set) |
+| node `collapsed` | `true` to open the node collapsed |
+| node `meta` | any object up to 4 KiB; never read by the library, handed back to your `badge` callback |
+| node `children` | array of nodes |
+| `links[]` | `from`, `to` (node ids, not the same node), `type` (`relates` default, `blocks`, `supersedes`), optional `label` (at most 60 graphemes) |
+
+Limits: 2 000 nodes, depth 16 (the root is level 1). Position numbers such as `3.2` are computed from the tree; they are
+not a field of the data.
+
+### Statuses
+
+| Key | Default label | Symbol |
+|---|---|---|
+| `open` | Open | hollow ring |
+| `pending` | Pending | half-filled amber ring |
+| `decided` | Decided | green check |
+| `parked` | Parked | grey double bar |
+| `blocked` | Blocked | red crossed ring |
+| `superseded` | Superseded | grey dash, title struck through and faded |
+
+## API
+
+```js
+import { createMindmap } from "simple-mindmap";
+const mm = createMindmap(el, {
+  data,                      // JSON as above
+  view: "both",              // "both" | "right" | "outline"
+  mode: "view",              // "view" | "select" | "edit"
+  state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search}; state.view wins over `view`
+  collapseDepth: null,       // collapse every node at this depth (root = 0) when there is no `state`
+  actions: [],               // menu items of a node: [{id, label, when?(node) -> bool}]
+  strings: {},               // every visible text (see "Strings")
+  statuses: {},              // {key: {label, shape?, symbol?, color?}}; replaces the default six when given
+  badge: null,               // (node) -> {symbol, label} | null; a small extra mark you decide; called on every draw
+  search: true, tools: true, // the floating search box and the tools; turn off when you draw your own
+  limits: null,              // tighter limits: {nodes, depth, title, label, note, meta}
+  theme: null,               // "light" | "dark" to force a palette; default follows prefers-color-scheme
+});
+```
+
+| Method | Result |
+|---|---|
+| `mm.setData(json)` | replaces the whole tree, keeping selection, collapsed nodes and viewport by id where they still exist. Bad data: the drawn tree stays, returns `{ok: false, errors}` and emits `invalid` |
+| `mm.apply(ops)` | applies a batch atomically (see Operations). Any error: nothing changes, returns `{ok: false, errors, index}` and emits `invalid` |
+| `mm.select(id)` `mm.reveal(id)` `mm.focus(id \| null)` `mm.collapse(id)` `mm.expand(id)` `mm.setView(kind)` `mm.fit()` | change the view; return `false` for an unknown id |
+| `mm.search(q)` `mm.next()` `mm.prev()` | `{hits: [ids], index}`; matches titles (case and accent insensitive) and position numbers, never internal ids |
+| `mm.getData()` | a deep copy of the current data (no view state), or `null` before any valid data |
+| `mm.getNode(id)` | `{id, path, parent, children: [ids], node: {id, title, note?, status?, tone?, collapsed?, meta?}}` (a copy) or `null` |
+| `mm.getPath(id)` | `"3.2"` (root: `""`) or `null` |
+| `mm.find(q)` | ids that match, same rule as the search box |
+| `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search}` |
+| `mm.export(fmt)` | `"json"`, `"outline"` (Markdown), `"mermaid"`, `"svg"` (the current view, measured by this page, concrete colours); `null` before valid data |
+| `mm.errors` / `mm.warnings` | the last validation result (copies) |
+| `mm.on(event, fn)` | returns a function that removes the listener |
+| `mm.destroy()` | removes the component and every listener |
+
+Pure functions (`simple-mindmap/core`, no DOM): `validate(json, {limits, statuses})`, `applyOps(json, ops, {limits, statuses})`
+(`{ok: true, data, view, warnings}` or `{ok: false, errors, index}`; the input is never changed), `toOutline(json)`,
+`toMermaid(json)`, `fromOutline(markdown, {rootTitle})`, `pathOf(json, id)`.
+
+Functions that measure text (browser only, also exported from `simple-mindmap`): `layout(data, {view, collapsed, focus,
+measure, badge})` and `toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected})`.
+`measure(text, kind)` returns a width in pixels for `kind` = `"root"`, `"node"`, `"num"` or `"small"`.
+
+### Operations
+
+| `op` | Fields | Effect |
+|---|---|---|
+| `add` | `parent`, `node {id?, title, status?, tone?, note?, meta?, children?}`, `after?` or `first?` | adds a node (with its subtree); appended by default |
+| `edit` | `id`, `title?`, `note?`, `tone?` | changes text; `null` removes `note` / `tone` |
+| `status` | `id`, `to` | sets the status (`null` removes it); a status replaces the tone |
+| `move` | `id`, `parent`, `after?` or `first?` | moves a node; never into itself or its descendants (`move_into_self`); the root cannot move |
+| `remove` | `id`, `recursive?` | removes a node; a node with children needs `recursive: true`; links to removed nodes are removed too |
+| `link` / `unlink` | `from`, `to`, `type`, `label?` | adds or updates / removes a cross link (`unlink` without `type` removes every type) |
+| `meta` | `id`, `meta {...}` | shallow-merges into `meta` (`null` removes a key); `badge(node)` is called again |
+| `collapse` / `expand` / `select` / `focus` | `id` | view only; the data does not change |
+
+Ops run in order on a copy; the result is validated as a whole after the last op; a failure anywhere returns the error
+with the index of the failing op (or `null` when the final check failed) and nothing changes.
+
+### Modes and events
+
+| Mode | The user can | Events |
+|---|---|---|
+| `view` | pan, zoom, collapse / expand, search, change layout | `viewport {x, y, k}`, `toggle {id, collapsed}`, `view {kind}`, `search {q, hits}` |
+| `select` | + select, open (Enter or double click), node menu | + `select {id}`, `open {id}`, `action {action, id}` |
+| `edit` | + drag to move, rename in place (F2), add child (Tab), add sibling, delete (Delete) | + `intent {op, ...}` in exactly the shape of `apply` |
+
+- In `edit` mode the component **only emits `intent`**. Check it, store it, then call `mm.apply([intent])`.
+- **Interaction events** (`select`, `open`, `action`, `toggle`, `view`, `viewport`, `search`, `intent`) come only from user
+  input, never from your calls to `apply`, `setData`, `select` and the other methods.
+- **State events** (`invalid {errors, source, index?}`, `error {message}`) are emitted for your calls too. Events raised while
+  `createMindmap` runs are delivered right after it returns, so a listener added on the next line receives them.
+- Enter in the search box goes to the next match (Shift+Enter: previous) and never emits `open`.
+- Events carry ids, never DOM nodes or data copies; call `getNode(id)` when you need the data.
+- Decide on the return value of `setData` / `apply`, not on `invalid` (listening to `invalid` and calling `setData` again
+  can loop).
+
+Keyboard (when the component has focus): arrows move the selection, Enter opens, Space collapses / expands,
+Cmd/Ctrl+F focuses the search box, Escape closes the menu; in `edit` mode F2, Tab and Delete as above.
+Mouse: drag the background to pan, wheel to scroll, Cmd/Ctrl + wheel (or pinch) to zoom.
+
+### Validation and bad data
+
+`validate(json, {limits, statuses})` returns `{ok, errors, warnings, data}`. Every error is
+`{path, code, message, id?, title?, limit?}`: `path` is the JSON path (`root.children[2].id`); build your own sentence
+from `code` and its fields rather than parsing the English `message`. `data` is the normalised copy (NFC; control
+characters removed from one-line text; notes kept verbatim; `mindmap` set to 1).
+
+Fixed error codes (contract of 1.x; you can translate them):
+
+| Code | When |
+|---|---|
+| `not_object` | not JSON / not an object; a node, link or `children` of the wrong type |
+| `bad_version` | `mindmap` is not 1 |
+| `missing_root` | no `root` |
+| `missing_title` | a node without a title (or the title is empty after cleaning) |
+| `bad_id` | id does not match the pattern |
+| `dup_id` | the same id twice |
+| `too_many_nodes` | more than `limits.nodes` |
+| `too_deep` | deeper than `limits.depth` |
+| `bad_status` | status not among the configured statuses |
+| `bad_tone` | unknown tone |
+| `bad_layout` | unknown layout |
+| `bad_link` | link end is not a node, or unknown type |
+| `self_link` | a link from a node to itself |
+| `bad_meta` | meta is not an object, or too large |
+| `text_too_long` | title, label or note over its limit (or not a string) |
+| `no_such_node` | (apply) an op names a node that does not exist |
+| `move_into_self` | (apply) move into itself or a descendant |
+| `bad_op` | (apply) unknown or malformed op, moving or removing the root, removing a node with children without `recursive` |
+
+Warnings never block: `unknown_key`, `tone_ignored`, `bad_value`.
+
+Within 1.x validation only ever gets looser. The 1.0 sample data set in `test/fixtures/v1/` must stay valid in every
+1.x release; a stricter rule needs a new package name.
+
+| When | Behaviour |
+|---|---|
+| `createMindmap` with bad data | draws no tree, shows the error as text (`strings.invalid` + `strings.errorLine(firstError)`), emits `invalid {source: "init"}`; `mm.errors` holds the list; a later valid `setData` draws normally |
+| `setData` with bad data | keeps the current picture, emits `invalid {source: "setData"}`, returns `{ok: false, errors}` |
+| `apply` with a bad batch | atomic: nothing changes, emits `invalid {source: "apply", index}`, returns `{ok: false, errors, index}` |
+| a drawing failure (for example text measuring throws) | caught; error text `strings.renderFailed`; emits `error {message}` |
+| before any valid data | `getData()` and `getNode()` return `null`, `find()` returns `[]`, `export()` returns `null` |
+
+## Views
+
+- Selecting a node draws a ring around it; the selection survives a view change.
+- Nodes with children have a collapse button; a collapsed node shows `+5` (tooltip "5 hidden children").
+- The search box floats at the top left of the map, and is the first row of the outline. Matches are highlighted in
+  place; the branch of the current match opens and scrolls into view.
+- Tools: layout (both sides / tree to the right / outline) and "All links" at the top right; zoom out, zoom in, fit and
+  "focus this branch" at the bottom right. A focused branch is drawn as the root, with a path back at the bottom left.
+- Cross links: `blocks` red with an arrow, `supersedes` grey with an arrow, `relates` thin dashed. By default only `blocks`
+  and the links of the selected node are drawn; "All links" shows the rest. A link end inside a collapsed branch stops at
+  the nearest visible ancestor (hollow dot).
+- More than 80 nodes: the map opens collapsed to depth 2, the outline to depth 3 (unless `state` or `collapseDepth`).
+- Each node shows its status symbol (or tone dot), its position number (`3.2`, monospace, muted) and its title (clipped
+  at 48 graphemes with `...` on the map, full in the tooltip and in the outline). Internal ids are never shown.
+- Branches carry the colour of their first-level branch; the status colour belongs to the symbol only.
+
+## Theming
+
+The component injects its CSS once per document as `<style id="simple-mindmap-css">` (the same text as
+`src/mindmap.css`). Override the variables on `.simple-mindmap` or any ancestor:
+
+`--mm-bg`, `--mm-text`, `--mm-muted`, `--mm-node-bg`, `--mm-node-border`, `--mm-root-bg`, `--mm-root-text`, `--mm-select`,
+`--mm-hit`, `--mm-hit-current`, `--mm-chip-bg`, `--mm-green`, `--mm-amber`, `--mm-red`, `--mm-blue`, `--mm-purple`,
+`--mm-grey`, `--mm-link-blocks`, `--mm-link-supersedes`, `--mm-link-relates`, `--mm-edge-0` ... `--mm-edge-7`,
+`--mm-font`, `--mm-mono`.
+
+A dark palette applies under `prefers-color-scheme: dark` unless `data-theme="light"`; `theme: "dark"` forces it.
+`export("svg")` reads the current values, so the file has concrete colours and opens anywhere.
+
+## Strings
+
+Every visible text comes from `strings` (English defaults). A value is a string with `{placeholders}` or a function.
+
+`invalid`, `renderFailed`, `errorLine(error)`, `search`, `searchLabel`, `matches` (`{index}`, `{total}`), `noMatches`,
+`prevMatch`, `nextMatch`, `views`, `viewBoth`, `viewRight`, `viewOutline`, `allLinks`, `zoomIn`, `zoomOut`, `fit`,
+`focusBranch`, `focusPath`, `more`, `expand`, `collapse`, `rename`, `addChild`, `addSibling`, `remove`, `newIdea`,
+`hidden` (`{n}`), `linkBlocks`, `linkSupersedes`, `linkRelates`. Status labels come from `statuses`.
+
+## Security notes
+
+- Titles, labels, badges and error messages are set with `textContent` / SVG `<text>`; nothing is parsed as HTML.
+- Notes are never drawn by the component (they are untrusted Markdown; draw them in your own sandbox).
+- No network access, no `eval`, no external fonts. The only inline style is the injected `<style>` element plus CSSOM
+  style properties, so a CSP needs `style-src 'unsafe-inline'` (or a hash of the stylesheet).
+
+## Demo
+
+Browsers refuse ES module imports from `file://` pages, so the demo is served by a tiny local server (Node 22+, no
+dependencies, listens on 127.0.0.1 only):
+
+```sh
+node demo/serve.mjs          # or: npm run demo
+# open http://127.0.0.1:8765/demo/
+```
+
+## Development
+
+Nothing to install: there are no dependencies and no devDependencies.
+
+```sh
+npm test                 # node --test test/unit/  (model, ops, layout with a fake measure, svg, export, validate, repo rules)
+npm run test:browser     # headless Chrome through the DevTools protocol, real mouse and keyboard input
+npm run test:all         # both
+npm run measure          # layout time and overlap count for 400 and 2 000 nodes
+npm run mutate           # mutation checks (see below)
+npm run sync-css         # copy src/mindmap.css into the CSS constant of src/mindmap.js after editing the CSS
+```
+
+Browser tests need Chrome or Chromium; set `CHROME=/path/to/chrome` if it is not found. Without a browser they are
+reported as skipped, not passed.
+
+### Mutation checks
+
+Every important check has a documented mutation in `test/tools/mutations.mjs`: a small change to the source that must
+turn a named test red. `npm run mutate` copies the repository to a temporary directory, applies each mutation there
+(the working tree is never touched), runs the suite and reports, per mutation, whether the expected test failed.
+It exits non-zero when a mutation survives or no longer applies.
+
+```sh
+npm run mutate                          # all mutations (unit and browser; several minutes)
+npm run mutate -- --suite unit          # only the node suite
+npm run mutate -- --only M01,M20        # selected mutations
+```
+
+When you change the code a mutation targets, update its `find` text so it still applies.
+
+### Versioning
+
+Semantic versioning. The API above, the operation shapes, the events and the error codes are the 1.x contract.
+Incompatible changes ship under a new package name, not a new major of this one.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

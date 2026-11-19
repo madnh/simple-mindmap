@@ -1,0 +1,33 @@
+{
+  "mindmap": 1,
+  "title": "Release plan",
+  "root": {
+    "title": "Release 1.0",
+    "children": [
+      {
+        "title": "Library",
+        "note": "Pure ESM, no dependencies.\nSecond line of the note.",
+        "children": [
+          {
+            "title": "Tests"
+          },
+          {
+            "title": "Demo"
+          }
+        ]
+      },
+      {
+        "title": "Docs",
+        "children": [
+          {
+            "title": "README",
+            "note": "- a note line that looks like a bullet\n\nafter a blank line"
+          }
+        ]
+      },
+      {
+        "title": "Ship"
+      }
+    ]
+  }
+}

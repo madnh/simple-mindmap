@@ -1,0 +1,68 @@
+{
+  "title": "Every status and tone",
+  "root": {
+    "title": "Legend",
+    "children": [
+      {
+        "id": "s-open",
+        "title": "open",
+        "status": "open"
+      },
+      {
+        "id": "s-pending",
+        "title": "pending",
+        "status": "pending"
+      },
+      {
+        "id": "s-decided",
+        "title": "decided",
+        "status": "decided"
+      },
+      {
+        "id": "s-parked",
+        "title": "parked",
+        "status": "parked"
+      },
+      {
+        "id": "s-blocked",
+        "title": "blocked",
+        "status": "blocked"
+      },
+      {
+        "id": "s-superseded",
+        "title": "superseded",
+        "status": "superseded"
+      },
+      {
+        "id": "t-green",
+        "title": "green",
+        "tone": "green"
+      },
+      {
+        "id": "t-amber",
+        "title": "amber",
+        "tone": "amber"
+      },
+      {
+        "id": "t-red",
+        "title": "red",
+        "tone": "red"
+      },
+      {
+        "id": "t-blue",
+        "title": "blue",
+        "tone": "blue"
+      },
+      {
+        "id": "t-purple",
+        "title": "purple",
+        "tone": "purple"
+      },
+      {
+        "id": "t-grey",
+        "title": "grey",
+        "tone": "grey"
+      }
+    ]
+  }
+}

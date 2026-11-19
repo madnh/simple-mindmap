@@ -1,0 +1,81 @@
+{
+  "mindmap": 1,
+  "title": "Notification architecture",
+  "layout": "both",
+  "root": {
+    "id": "root",
+    "title": "Notifications",
+    "note": "Short **Markdown** note.\n\n- kept verbatim\n- including\ttabs",
+    "children": [
+      {
+        "id": "pane",
+        "title": "Pane notifications",
+        "status": "decided",
+        "children": [
+          {
+            "id": "pane-badge",
+            "title": "Badge on the tab"
+          },
+          {
+            "id": "pane-sound",
+            "title": "Sound",
+            "status": "parked"
+          }
+        ]
+      },
+      {
+        "id": "plugin",
+        "title": "Plugin notifications",
+        "tone": "amber",
+        "collapsed": true,
+        "children": [
+          {
+            "title": "Permission prompt",
+            "status": "pending"
+          },
+          {
+            "title": "Rate limit",
+            "status": "blocked",
+            "meta": {
+              "by": "agent",
+              "at": "2026-11-19T10:00:00Z"
+            }
+          }
+        ]
+      },
+      {
+        "id": "history",
+        "title": "History",
+        "status": "open",
+        "children": [
+          {
+            "title": "Old inbox",
+            "status": "superseded"
+          }
+        ]
+      },
+      {
+        "title": "Settings",
+        "tone": "blue"
+      }
+    ]
+  },
+  "links": [
+    {
+      "from": "plugin",
+      "to": "pane",
+      "type": "relates",
+      "label": "shared profile"
+    },
+    {
+      "from": "history",
+      "to": "pane-badge",
+      "type": "blocks"
+    },
+    {
+      "from": "pane-sound",
+      "to": "history",
+      "type": "supersedes"
+    }
+  ]
+}

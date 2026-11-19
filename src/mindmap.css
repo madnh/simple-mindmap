@@ -1,0 +1,106 @@
+.simple-mindmap {
+  --mm-bg: #ffffff; --mm-text: #1f2328; --mm-muted: #6e7781; --mm-node-bg: #ffffff; --mm-node-border: #d0d7de;
+  --mm-root-bg: #24292f; --mm-root-text: #ffffff; --mm-select: #0969da; --mm-hit: #fff1a8; --mm-hit-current: #ffd33d;
+  --mm-chip-bg: #eaeef2;
+  --mm-green: #1a7f37; --mm-amber: #bf8700; --mm-red: #cf222e; --mm-blue: #0969da; --mm-purple: #8250df; --mm-grey: #6e7781;
+  --mm-link-blocks: #cf222e; --mm-link-supersedes: #6e7781; --mm-link-relates: #8c959f;
+  --mm-edge-0: #4c8bf5; --mm-edge-1: #e8710a; --mm-edge-2: #1e8e3e; --mm-edge-3: #a142f4;
+  --mm-edge-4: #d93025; --mm-edge-5: #12a4af; --mm-edge-6: #c26401; --mm-edge-7: #5f6368;
+  --mm-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mm-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  position: relative; overflow: hidden; box-sizing: border-box; width: 100%; height: 100%; min-height: 240px;
+  background: var(--mm-bg); color: var(--mm-text); font-family: var(--mm-font); font-size: 13px; line-height: 1.35;
+  outline: none; -webkit-user-select: none; user-select: none;
+}
+.simple-mindmap[data-theme="dark"] {
+  --mm-bg: #0d1117; --mm-text: #e6edf3; --mm-muted: #8b949e; --mm-node-bg: #161b22; --mm-node-border: #30363d;
+  --mm-root-bg: #e6edf3; --mm-root-text: #0d1117; --mm-select: #58a6ff; --mm-hit: #5a4a00; --mm-hit-current: #9e7700;
+  --mm-chip-bg: #30363d; --mm-green: #3fb950; --mm-amber: #d29922; --mm-red: #f85149; --mm-blue: #58a6ff;
+  --mm-purple: #bc8cff; --mm-grey: #8b949e; --mm-link-blocks: #f85149; --mm-link-supersedes: #8b949e; --mm-link-relates: #6e7681;
+}
+@media (prefers-color-scheme: dark) {
+  .simple-mindmap:not([data-theme="light"]) {
+    --mm-bg: #0d1117; --mm-text: #e6edf3; --mm-muted: #8b949e; --mm-node-bg: #161b22; --mm-node-border: #30363d;
+    --mm-root-bg: #e6edf3; --mm-root-text: #0d1117; --mm-select: #58a6ff; --mm-hit: #5a4a00; --mm-hit-current: #9e7700;
+    --mm-chip-bg: #30363d; --mm-green: #3fb950; --mm-amber: #d29922; --mm-red: #f85149; --mm-blue: #58a6ff;
+    --mm-purple: #bc8cff; --mm-grey: #8b949e; --mm-link-blocks: #f85149; --mm-link-supersedes: #8b949e; --mm-link-relates: #6e7681;
+  }
+}
+.simple-mindmap *, .simple-mindmap *::before, .simple-mindmap *::after { box-sizing: border-box; }
+.simple-mindmap:focus-visible { box-shadow: inset 0 0 0 2px var(--mm-select); }
+.simple-mindmap .mm-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.simple-mindmap .mm-canvas.is-panning { cursor: grabbing; }
+.simple-mindmap .mm-viewport { transform-origin: 0 0; }
+.simple-mindmap .mm-node { cursor: default; }
+.simple-mindmap[data-mode="select"] .mm-node, .simple-mindmap[data-mode="edit"] .mm-node { cursor: pointer; }
+.simple-mindmap .mm-node.is-dragging { opacity: 0.6; pointer-events: none; }
+.simple-mindmap .mm-node.is-drop .mm-box { stroke: var(--mm-select) !important; stroke-width: 2.5; }
+.simple-mindmap .mm-toggle, .simple-mindmap .mm-chip { cursor: pointer; }
+.simple-mindmap .mm-btn {
+  border: 1px solid var(--mm-node-border); background: var(--mm-node-bg); color: var(--mm-text); border-radius: 6px;
+  font: inherit; font-size: 12px; line-height: 1.2; padding: 4px 8px; cursor: pointer; min-width: 26px;
+}
+.simple-mindmap .mm-btn:hover { background: var(--mm-chip-bg); }
+.simple-mindmap .mm-btn:disabled { opacity: 0.45; cursor: default; }
+.simple-mindmap .mm-btn[aria-pressed="true"] { background: var(--mm-select); border-color: var(--mm-select); color: var(--mm-bg); }
+.simple-mindmap .mm-btn:focus-visible, .simple-mindmap .mm-menu button:focus-visible { outline: 2px solid var(--mm-select); outline-offset: 1px; }
+.simple-mindmap .mm-group { display: inline-flex; gap: 0; }
+.simple-mindmap .mm-group .mm-btn { border-radius: 0; margin-left: -1px; }
+.simple-mindmap .mm-group .mm-btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.simple-mindmap .mm-group .mm-btn:last-child { border-radius: 0 6px 6px 0; }
+.simple-mindmap .mm-search {
+  position: absolute; top: 8px; left: 8px; z-index: 2; display: flex; align-items: center; gap: 4px;
+  background: var(--mm-node-bg); border: 1px solid var(--mm-node-border); border-radius: 6px; padding: 2px 4px;
+}
+.simple-mindmap .mm-search input {
+  border: 0; background: transparent; color: inherit; font: inherit; width: 13em; padding: 3px 4px; outline: none; min-width: 0;
+}
+.simple-mindmap .mm-search .mm-count { color: var(--mm-muted); font-size: 12px; white-space: nowrap; }
+.simple-mindmap .mm-search .mm-btn { border: 0; padding: 2px 6px; }
+.simple-mindmap .mm-tools { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.simple-mindmap .mm-zoom { position: absolute; bottom: 8px; right: 8px; z-index: 2; display: flex; gap: 4px; }
+.simple-mindmap .mm-crumbs {
+  position: absolute; bottom: 8px; left: 8px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+  max-width: calc(100% - 220px); font-size: 12px; color: var(--mm-muted);
+}
+.simple-mindmap .mm-crumbs .mm-btn { padding: 2px 6px; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.simple-mindmap .mm-more { position: absolute; z-index: 2; padding: 0 6px; height: 22px; line-height: 1; }
+.simple-mindmap .mm-menu {
+  position: absolute; z-index: 3; display: flex; flex-direction: column; min-width: 11em; padding: 4px;
+  background: var(--mm-node-bg); border: 1px solid var(--mm-node-border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.simple-mindmap .mm-menu button {
+  border: 0; background: transparent; color: var(--mm-text); font: inherit; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;
+}
+.simple-mindmap .mm-menu button:hover { background: var(--mm-chip-bg); }
+.simple-mindmap .mm-rename {
+  position: absolute; z-index: 3; font: inherit; color: var(--mm-text); background: var(--mm-node-bg);
+  border: 2px solid var(--mm-select); border-radius: 6px; padding: 3px 6px; min-width: 8em; -webkit-user-select: text; user-select: text;
+}
+.simple-mindmap .mm-error { padding: 16px; }
+.simple-mindmap .mm-error-title { font-weight: 600; }
+.simple-mindmap .mm-error-detail { color: var(--mm-muted); margin-top: 4px; overflow-wrap: anywhere; }
+.simple-mindmap .mm-outline { position: absolute; inset: 0; overflow: auto; padding: 8px 12px 24px; }
+.simple-mindmap .mm-outline .mm-search { position: static; display: inline-flex; margin: 0 0 6px; }
+.simple-mindmap .mm-outline-head { display: flex; align-items: center; gap: 8px; padding-right: 150px; min-height: 34px; }
+.simple-mindmap .mm-tree, .simple-mindmap .mm-tree ul { list-style: none; margin: 0; padding: 0; }
+.simple-mindmap .mm-tree ul { padding-left: 22px; }
+.simple-mindmap .mm-row { display: flex; align-items: flex-start; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: default; }
+.simple-mindmap[data-mode="select"] .mm-row, .simple-mindmap[data-mode="edit"] .mm-row { cursor: pointer; }
+.simple-mindmap .mm-row.is-selected { box-shadow: inset 0 0 0 2px var(--mm-select); }
+.simple-mindmap .mm-row.is-hit { background: var(--mm-hit); }
+.simple-mindmap .mm-row.is-current { background: var(--mm-hit-current); }
+.simple-mindmap .mm-row.is-root .mm-title { font-weight: 600; font-size: 15px; }
+.simple-mindmap .mm-row .mm-num { font-family: var(--mm-mono); font-size: 11px; color: var(--mm-muted); padding-top: 2px; white-space: nowrap; }
+.simple-mindmap .mm-row .mm-title { white-space: normal; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.simple-mindmap .mm-row .mm-badge { color: var(--mm-muted); font-size: 11px; padding-top: 2px; }
+.simple-mindmap .mm-row.is-superseded .mm-title { text-decoration: line-through; opacity: 0.55; }
+.simple-mindmap .mm-arrow {
+  flex: none; width: 16px; height: 18px; border: 0; padding: 0; background: none; color: var(--mm-muted); cursor: pointer; font-size: 11px;
+}
+.simple-mindmap .mm-arrow[aria-expanded="true"] { transform: rotate(90deg); }
+.simple-mindmap .mm-arrow-pad { flex: none; width: 16px; }
+.simple-mindmap .mm-sym { flex: none; width: 12px; height: 12px; margin-top: 3px; overflow: visible; }
+@media (prefers-reduced-motion: no-preference) {
+  .simple-mindmap .mm-viewport.is-animating { transition: transform 180ms ease-out; }
+}
