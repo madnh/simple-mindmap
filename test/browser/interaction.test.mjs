@@ -504,3 +504,17 @@ t("theming: --mm-* set on an ancestor or on .simple-mindmap wins, also under OS 
     await ev(`const s = document.getElementById("host-theme"); if (s) s.remove();`);
   }
 });
+
+t("getNode() returns a copy: changing it changes neither the data nor the picture", async () => {
+  await make({ mode: "select" });
+  const r = await ev(`
+    mm.apply([{ op: "meta", id: "b", meta: { by: "x" } }]);
+    const before = JSON.stringify(mm.getData());
+    const g = mm.getNode("b");
+    g.node.title = "MUTATED"; g.node.status = "blocked"; g.node.meta.by = "MUTATED"; g.children.push("zz");
+    mm.setFilter(null); // forces a redraw from the component's own data
+    return { same: before === JSON.stringify(mm.getData()), again: mm.getNode("b"), text: document.querySelector('#host [data-id="b"]').textContent };`);
+  assert.ok(r.same, "getData unchanged");
+  assert.deepEqual(r.again, { id: "b", path: "2", parent: "r", children: [], node: { id: "b", title: "Beta", status: "pending", meta: { by: "x" } } });
+  assert.ok(r.text.includes("Beta") && !r.text.includes("MUTATED"));
+});

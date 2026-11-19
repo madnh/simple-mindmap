@@ -147,6 +147,10 @@ export const MUTATIONS = [
     edits: [["src/mindmap.js", "cs.getPropertyValue(`--mm-${t}`).trim() || ", ""]] },
   { id: "M68", what: "style element appended after the host's styles", suite: "browser", expect: "theming:",
     edits: [["src/mindmap.js", "at.insertBefore(style, at.firstChild);", "at.appendChild(style);"]] },
+  { id: "M69", what: "getNode returns the internal node (review R06)", suite: "browser", expect: "getNode() returns a copy",
+    edits: [["src/mindmap.js", "children: kidIds(id), node: publicNode(e.node, id) };", "children: kidIds(id), node: e.node };"]] },
+  { id: "M70", what: "getNode shares meta with the data", suite: "browser", expect: "getNode() returns a copy",
+    edits: [["src/mindmap.js", "if (n.meta) out.meta = clone(n.meta);", "if (n.meta) out.meta = n.meta;"]] },
   // ---- repository rules ----
   { id: "M39", what: "CSS file edited without syncing", suite: "unit", expect: "src/mindmap.css and the CSS injected",
     edits: [["src/mindmap.css", ".simple-mindmap .mm-error { padding: 16px; }", ".simple-mindmap .mm-error { padding: 17px; }"]] },
