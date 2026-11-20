@@ -636,7 +636,7 @@ t("themes: named themes on a light/dark base; a switch removes the old tokens; u
   assert.deepEqual(r.s2, r.s1, "an unknown name changes nothing");
   assert.deepEqual(r.bad, ["bad_theme", "bad_theme", "bad_theme", "bad_theme"]); assert.deepEqual(r.s3, r.s1);
   assert.deepEqual(r.r4, { ok: true });
-  assert.deepEqual(r.s4, { mode: "dark", bg: "#000001", nodeBg: "", edge0: "", state: null }, "an inline theme has no name");
+  assert.deepEqual(r.s4, { mode: "dark", bg: "#000001", nodeBg: "", edge0: "", state: { base: "dark", tokens: { bg: "#000001", nonsense: "x" } } }, "an inline theme is kept as a copy");
   assert.deepEqual(r.warn4, [["themes.broken", "bad_value"], ["theme.tokens.nonsense", "unknown_key"]]);
   assert.deepEqual(r.s5, { mode: "light", bg: "", nodeBg: "", edge0: "#111111", state: "light" }, "a host override of the built-in light");
   assert.deepEqual(r.s6, { mode: null, bg: "", nodeBg: "", edge0: "", state: null }, "null follows the OS");
@@ -782,4 +782,67 @@ t("Lucide in the page: icon {nodes, stroke} and render via lucide createElement 
   assert.equal(r.nodes, 2000);
   assert.ok(r.calls <= 6 * 4, `render called ${r.calls} times for 2 000 nodes over the draws of this test`);
   console.log(`# browser 2000 nodes, one redraw (right view): built-in shapes ${r.plain.toFixed(0)} ms; every status through render() ${r.render.toFixed(0)} ms (${r.calls} render calls)`);
+});
+
+// ---- 1.1 review round 1 (§823) ----
+t("M2: an inline theme round-trips through getState(); a setTheme before the first valid data survives it", async () => {
+  const r = await ev(`
+    const w = () => document.querySelector("#host .simple-mindmap");
+    const snap = () => ({ theme: mm.getState().theme, mode: w().dataset.theme ?? null, bg: w().style.getPropertyValue("--mm-bg") });
+    make({ data: ${JSON.stringify(SMALL)}, theme: { base: "dark", tokens: { bg: "#000001" } } });
+    const st = mm.getState();
+    make({ data: ${JSON.stringify(SMALL)}, state: st });
+    const a = snap();
+    make({ data: { root: { title: "" } }, themes: ${THEMES}, state: { theme: "solarized" } });
+    const b0 = snap();
+    const set = mm.setTheme("midnight");
+    const ok = mm.setData(${JSON.stringify(SMALL)}).ok;
+    const b = snap();
+    make({ data: ${JSON.stringify(SMALL)}, state: { theme: "nope" } });
+    const c = { ...snap(), warn: mm.warnings.map((x) => [x.path, x.code]) };
+    return { st: st.theme, a, b0, set, ok, b, c };`);
+  assert.deepEqual(r.st, { base: "dark", tokens: { bg: "#000001" } });
+  assert.deepEqual(r.a, { theme: { base: "dark", tokens: { bg: "#000001" } }, mode: "dark", bg: "#000001" });
+  assert.deepEqual(r.b0, { theme: "solarized", mode: "light", bg: "#fdf6e3" });
+  assert.deepEqual(r.set, { ok: true }); assert.equal(r.ok, true);
+  assert.deepEqual(r.b, { theme: "midnight", mode: "dark", bg: "#0b1020" }, "the first valid setData does not re-apply state.theme");
+  assert.deepEqual(r.c, { theme: null, mode: null, bg: "", warn: [["state.theme", "bad_theme"]] });
+});
+
+t("L1: export(\"svg\") writes only colours: url() / var() tokens and status colours fall back, color-mix resolves; 0 url( and 0 var(", async () => {
+  const r = await ev(`
+    make({ data: ${JSON.stringify(SMALL)}, theme: { tokens: { bg: "url(https://evil.test/bg)", "node-bg": "color-mix(in srgb, red 50%, blue)", "edge-0": "var(--nope)" } },
+      statuses: { decided: { color: "url(https://evil.test/p.svg#x)", path: "M1 1L11 11" }, pending: { color: "color-mix(in srgb, red 50%, blue)" } } });
+    const svg = mm.export("svg");
+    return { url: (svg.match(/url\\((?!#)/g) || []).length, internal: (svg.match(/url\\(#/g) || []).length, vars: svg.split("var(").length - 1, mix: svg.split("color-mix").length - 1,
+      resolved: svg.split("color(srgb 0.5 0 0.5)").length - 1 + svg.split("rgb(128, 0, 128)").length - 1, bg: svg.includes('fill="#ffffff"'), probes: document.querySelectorAll("#host .simple-mindmap > span").length };`);
+  assert.equal(r.url, 0, "no url() other than the file's own #markers"); assert.equal(r.vars, 0); assert.equal(r.mix, 0);
+  assert.ok(r.internal >= 1, "the blocks marker is still referenced");
+  assert.ok(r.resolved >= 2, `color-mix resolved for the node-bg token and the pending status (${r.resolved})`);
+  assert.equal(r.bg, true, "a url() bg token falls back to the default");
+  assert.equal(r.probes, 0, "the probe element is removed");
+});
+
+t("L2: two module instances on one page (two URLs) never share an id; export(\"svg\", {idPrefix}) sets the file's ids", async () => {
+  const r = await ev(`
+    const A = await import("/src/mindmap.js?a"), B = await import("/src/mindmap.js?b");
+    const st = { decided: { path: "M1 1L11 11" }, pending: { icon: { nodes: [["circle", { cx: 12, cy: 12, r: 6 }]] } } };
+    const els = [0, 1, 2].map((i) => { const d = document.createElement("div"); d.style.cssText = "position:absolute;left:0;top:" + (720 + i * 260) + "px;width:500px;height:250px"; document.body.appendChild(d); return d; });
+    try {
+      const maps = [A.createMindmap(els[0], { data: ${JSON.stringify(SMALL)}, statuses: st }), B.createMindmap(els[1], { data: ${JSON.stringify(SMALL)}, statuses: st }),
+        A.createMindmap(els[2], { data: ${JSON.stringify(SMALL)}, statuses: st })];
+      const ids = [...document.querySelectorAll("[id]")].map((e) => e.id).filter((id) => /^mm\\d+-/.test(id));
+      const resolved = els.every((el) => [...el.querySelectorAll(".mm-status use")].every((u) => el.querySelector(u.getAttribute("href"))));
+      const exp = maps[0].export("svg", { idPrefix: "fileA" });
+      const out = { n: ids.length, unique: new Set(ids).size, resolved, sameModule: A.createMindmap === B.createMindmap,
+        expIds: [...exp.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]), def: [...maps[1].export("svg").matchAll(/ id="([^"]+)"/g)].map((m) => m[1]) };
+      maps.forEach((m) => m.destroy());
+      return out;
+    } finally { els.forEach((e) => e.remove()); }`);
+  assert.equal(r.sameModule, false, "two module instances");
+  assert.ok(r.n >= 6, `ids found: ${r.n}`);
+  assert.equal(r.unique, r.n, "no duplicate id on the page");
+  assert.equal(r.resolved, true);
+  assert.ok(r.expIds.length >= 2 && r.expIds.every((id) => id.startsWith("fileA-")), r.expIds.join());
+  assert.ok(r.def.every((id) => id.startsWith("mm-")), r.def.join());
 });

@@ -22,8 +22,11 @@ Added (all additive; data format, operations, validation, outline / Mermaid outp
 Fixed:
 - A host `symbol` on a default status key was ignored (the inherited `shape` won). An entry that sets any icon field now
   replaces every inherited icon field; `label`, `color` and `strike` still inherit.
-- A raw `var(...)` status colour leaked into the SVG export. `export("svg")` now resolves it in the page; `toSVG` draws it
-  grey.
+- A raw `var(...)` status colour leaked into the SVG export. Exported files now hold only colour syntax (status colours
+  and theme tokens): `export("svg")` resolves `var()` / `color-mix()` in the page; `toSVG` falls back (token: default
+  palette, status colour: grey), so no `var(` and no external `url(` reach a file.
+- `toSVG(json, {idPrefix})` and `export("svg", {idPrefix})`; component id prefixes are unique per page, also across two
+  copies of the library.
 
 ## 1.0.2
 

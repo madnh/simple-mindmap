@@ -77,14 +77,15 @@ test("icon whitelist: href, on*, style, unknown tags (also nested) and url() fil
     ["script", { src: "x.js" }],
     ["image", { href: "https://example.test/x.png" }],
     ["g", { id: "z" }, [["foreignObject", {}], ["circle", { cx: 6, cy: "6", r: ".5", fill: "currentColor", onload: "x()" }], ["use", { href: "#q" }]]],
-    ["rect", { x: "1e3", y: "javascript:1", width: "2", height: Infinity }],
+    ["rect", { x: "1e3", y: "javascript:1", width: "2", height: "3" }],
+    ["rect", { x: "1", width: "2", height: Infinity }], // no height left: dropped (L3)
   ] });
   assert.ok(ic);
   assert.deepEqual(ic.nodes.map((n) => n.t), ["path", "g", "rect"]);
   assert.deepEqual(ic.nodes[0].a, { d: "M1 1L5 5" });
   assert.deepEqual(ic.nodes[1].a, {});
   assert.deepEqual(ic.nodes[1].k.map((n) => [n.t, n.a, n.fills]), [["circle", { cx: "6", cy: "6", r: ".5" }, ["fill"]]]);
-  assert.deepEqual(ic.nodes[2].a, { x: "1e3", width: "2" });
+  assert.deepEqual(ic.nodes[2].a, { x: "1e3", width: "2", height: "3" });
   const out = statusIcon("x", { x: { color: "red", icon: { nodes: [["path", { d: "M1 1", onclick: "x()" }], ["script", {}]] } } });
   for (const bad of ["onclick", "script", "style=", "href", "url("]) assert.equal(count(out, bad), 0, bad);
   // caps: more than 64 nodes, or a d longer than 8 KiB -> null (the fallback level draws)
@@ -99,6 +100,45 @@ test("icon whitelist: href, on*, style, unknown tags (also nested) and url() fil
   assert.equal(sanitizeIcon({ viewBox: "0 0 24", nodes: CHECK }), null);
   assert.equal(sanitizeIcon("M1 1"), null);
   assert.equal(sanitizeIcon({ viewBox: "0 0 12 12", nodes: CHECK }).viewBox, "0 0 12 12");
+});
+
+test("L3: a node without its required geometry is dropped; an icon with nothing drawable falls back", () => {
+  const lost = [["path", { d: "M0 0 url(x)" }], ["polygon", { points: "0,0 1,1 x" }], ["circle", { cx: 1 }], ["ellipse", { rx: 1 }],
+    ["rect", { width: 1 }], ["line", { x1: 0, y1: 0, x2: 1 }], ["polyline", {}], ["g", {}, [["path", {}]]]];
+  assert.equal(sanitizeIcon({ nodes: lost }), null);
+  assert.equal(statusLevel("x", { x: { icon: { nodes: lost }, symbol: "*" } }).level, "symbol");
+  const kept = sanitizeIcon({ nodes: [...lost, ["line", { x1: 0, y1: 0, x2: 1, y2: 1 }], ["g", {}, [["circle", { r: 2 }]]]] });
+  assert.deepEqual(kept.nodes.map((n) => n.t), ["line", "g"]);
+  assert.deepEqual(kept.nodes[1].k.map((n) => n.t), ["circle"]);
+});
+
+test("M1 / L1: the export writes only colour syntax: var(...) and url(...) in token or status colours fall back (pure toSVG, statusIcon)", () => {
+  const bad = ["var(--x)", "url(https://evil.test/p.svg#x)", "color-mix(in srgb, red, blue)", "rgb(var(--x))", "red; fill: url(#a)", ""];
+  for (const b of bad) {
+    const s = toSVG(data("x"), { measure: fakeMeasure, statuses: { x: { label: "X", color: b, path: "M1 1L11 11" } },
+      theme: { green: b, bg: b, "edge-0": b } });
+    assert.equal(count(s, "var("), 0, b); assert.equal(count(s, "url("), 0, b);
+    assert.ok(s.includes(`fill="${THEME.grey}"`), `status colour ${b} -> grey`);
+    assert.ok(s.includes(`fill="${THEME.bg}"`), `bg token ${b} -> default`);
+    const icon = statusIcon("x", { x: { color: b, path: "M1 1" } }, { grey: b });
+    assert.equal(count(icon, "url(") + count(icon, "var("), 0, b);
+  }
+  for (const ok of ["#123", "#11223344", "rgb(1, 2, 3)", "rgba(1 2 3 / 50%)", "hsl(120deg 50% 50%)", "oklch(0.7 0.1 200)", "color(srgb 0.5 0 0.5)", "rebeccapurple", "currentColor"]) {
+    assert.ok(toSVG(data("x"), { measure: fakeMeasure, statuses: { x: { label: "X", color: ok, path: "M1 1L11 11" } } }).includes(`fill="${ok}"`), ok);
+  }
+  assert.ok(toSVG(data("x"), { measure: fakeMeasure, statuses: { x: { label: "X" } }, theme: { bg: "#010203" } }).includes('fill="#010203"'));
+});
+
+test("L2: toSVG idPrefix starts every id in the file (default mm); a bad prefix keeps the default", () => {
+  const d = { root: { id: "r", title: "R", children: [{ id: "a", title: "A", status: "x" }, { id: "b", title: "B", status: "x" }] }, links: [{ from: "a", to: "b", type: "blocks" }] };
+  const st = { x: { label: "X", path: "M1 1L11 11" } };
+  const ids = (s) => [...s.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+  const def = toSVG(d, { measure: fakeMeasure, statuses: st });
+  assert.deepEqual(ids(def), ["mm-arrow-blocks", "mm-s-0"]);
+  const own = toSVG(d, { measure: fakeMeasure, statuses: st, idPrefix: "fileA" });
+  assert.deepEqual(ids(own), ["fileA-arrow-blocks", "fileA-s-0"]);
+  assert.ok(own.includes('href="#fileA-s-0"') && own.includes("url(#fileA-arrow-blocks)"));
+  for (const bad of ['x" onload="y', "1abc", "", 5]) assert.deepEqual(ids(toSVG(d, { measure: fakeMeasure, statuses: st, idPrefix: bad })), ids(def), String(bad));
 });
 
 test("image: scheme filter; the export embeds data: only (0 external hrefs)", () => {

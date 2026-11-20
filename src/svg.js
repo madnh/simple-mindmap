@@ -66,6 +66,8 @@ export function mergeStatuses(statuses) {
 export const isStrike = (s) => !!s && (s.strike === true || s.shape === "superseded");
 
 const ICON_TAGS = new Set(["path", "circle", "ellipse", "line", "rect", "polyline", "polygon", "g"]);
+// The geometry a node needs to draw anything; a node without it is dropped (an icon with nothing left falls back).
+const REQUIRED = { path: ["d"], circle: ["r"], ellipse: ["rx", "ry"], rect: ["width", "height"], line: ["x1", "y1", "x2", "y2"], polyline: ["points"], polygon: ["points"] };
 const NUM_ATTRS = new Set(["cx", "cy", "r", "x", "y", "width", "height", "rx", "ry", "x1", "y1", "x2", "y2"]);
 const NUM_RE = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
 const D_RE = /^[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\-\s]*$/;
@@ -96,6 +98,7 @@ export function sanitizeIcon(icon) {
       }
       const kids = n[0] === "g" && Array.isArray(n[2]) ? walk(n[2]) : [];
       if (over) return out;
+      if (n[0] === "g" ? !kids.length : !REQUIRED[n[0]].every((k) => a[k] !== undefined && a[k] !== "")) continue;
       out.push({ t: n[0], a, fills, k: kids });
     }
     return out;
@@ -350,11 +353,24 @@ export function escapeXml(s) {
 }
 const ATTR_NAME = /^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/;
 
-// A raw colour containing var() cannot be resolved without a page: the export uses the grey token instead.
+// Colour syntax the export writes: #hex, a colour function (rgb ... oklch, and color(), which browsers give for a
+// computed color-mix) with plain arguments (no nested function, so no var() or
+// url()), or a colour name / keyword. Anything else (var(...), url(...), color-mix(...)) cannot be written as is.
+const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const FN_COLOR = /^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([-+0-9.eE%\s,/a-z]*\)$/i;
+const NAME_COLOR = /^[a-z]{3,24}$/i;
+export function isColor(v) {
+  if (typeof v !== "string") return false;
+  const s = v.trim();
+  return HEX_COLOR.test(s) || FN_COLOR.test(s) || NAME_COLOR.test(s);
+}
+
+// A paint in the export: a token value or raw colour that is not colour syntax falls back (token: the default palette;
+// raw: the grey token), so the file never holds var(...) or url(...).
 export function resolvePaint(v, theme) {
-  if (v.tok) return theme[v.tok] ?? THEME[v.tok];
-  if (/var\(/i.test(v.raw)) return theme.grey ?? THEME.grey;
-  return v.raw;
+  if (v.tok) { const t = theme[v.tok]; return isColor(t) ? t.trim() : THEME[v.tok]; }
+  if (isColor(v.raw)) return v.raw.trim();
+  return isColor(theme.grey) ? theme.grey.trim() : THEME.grey;
 }
 
 export function serialize(spec, theme = THEME) {
@@ -369,7 +385,10 @@ export function serialize(spec, theme = THEME) {
   return inner ? `${s}>${inner}</${spec.t}>` : `${s}/>`;
 }
 
-// toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected, filter, padding}) -> string | null
+// toSVG(json, {view, theme, measure, collapsed, focus, statuses, strings, badge, links, selected, filter, padding, idPrefix})
+// -> string | null. idPrefix ([A-Za-z][A-Za-z0-9_-]{0,31}, default "mm") starts every id in the file: <prefix>-s-<i>
+// for icons, <prefix>-arrow-<type> for markers; give each file inlined into one page its own.
+export const ID_PREFIX = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 export function toSVG(json, opts = {}) {
   const v = validate(json, { statuses: opts.statuses, limits: opts.limits });
   if (!v.ok) return null;
@@ -378,7 +397,8 @@ export function toSVG(json, opts = {}) {
   const lay = layout(data, { view: opts.view || data.layout || "both", collapsed: opts.collapsed, focus: opts.focus, measure: opts.measure, badge: opts.badge });
   let dim = null;
   if (Array.isArray(opts.filter)) { dim = new Set(); for (const [id, e] of indexTree(data)) if (!e.node.status || !opts.filter.includes(e.node.status)) dim.add(id); }
-  const sc = scene(data, lay, { statuses, strings: opts.strings, selected: opts.selected, links: opts.links, uid: "mm", dim, export: true });
+  const uid = typeof opts.idPrefix === "string" && ID_PREFIX.test(opts.idPrefix) ? opts.idPrefix : "mm";
+  const sc = scene(data, lay, { statuses, strings: opts.strings, selected: opts.selected, links: opts.links, uid, dim, export: true });
   const theme = { ...THEME, ...(opts.theme || {}) };
   const pad = opts.padding ?? 20;
   const { x0, y0, w, h } = lay.bounds;

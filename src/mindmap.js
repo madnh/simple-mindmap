@@ -3,7 +3,7 @@
 import { validate, indexTree, clone, VIEWS, countNodes } from "./model.js";
 import { applyOps } from "./ops.js";
 import { layout } from "./layout.js";
-import { scene, toSVG, DEFAULT_STRINGS, THEME, TOKENS, FONT, MONO, FONT_SIZE, fmt, mergeStatus, mergeStatuses, sanitizeIcon, iconSpec } from "./svg.js";
+import { scene, toSVG, DEFAULT_STRINGS, THEME, TOKENS, FONT, MONO, FONT_SIZE, fmt, mergeStatus, mergeStatuses, sanitizeIcon, iconSpec, isColor } from "./svg.js";
 import { toOutline, toMermaid } from "./export.js";
 import { buildOutline, specToDom } from "./outline.js";
 
@@ -58,14 +58,17 @@ function injectCSS(doc) {
   at.insertBefore(style, at.firstChild);
 }
 
-let uidSeq = 0;
+// One counter per page (globalThis), not per module instance: two copies of this file on one page (two URLs, two
+// bundles) must not hand out the same id prefix, or one map's <use> would pick the other map's <symbol>.
+const UID = Symbol.for("simple-mindmap.uid");
+function nextUid() { const g = globalThis; g[UID] = (Number.isInteger(g[UID]) ? g[UID] : 0) + 1; return g[UID]; }
 
 export function createMindmap(el, opts = {}) {
   if (!el || !el.ownerDocument) throw new TypeError("createMindmap needs a DOM element");
   const doc = el.ownerDocument;
   const win = doc.defaultView;
   injectCSS(doc);
-  const uid = `mm${++uidSeq}`;
+  const uid = `mm${nextUid()}`;
   const strings = { ...STRINGS, ...(opts.strings || {}) };
   // Each key merges with the default of the same key; an entry that sets an icon field replaces the inherited icon.
   const statuses = mergeStatuses(opts.statuses);
@@ -95,7 +98,7 @@ export function createMindmap(el, opts = {}) {
   // Themes (A2): a registry of named themes {base: "light" | "dark", tokens: {name: css value}} with the built-in
   // "light" and "dark" (hosts may override them). theme / setTheme take a name, null (follow the OS) or an inline
   // {base?, tokens}. data-theme = base picks the default palette; tokens become inline --mm-<name> on the root.
-  let themeTokens = [], themeWarnings = [], themeName = null;
+  let themeTokens = [], themeWarnings = [], themeName = null, themeInline = null; // themeInline: {base, tokens} copy
   const registryWarnings = [];
   const themes = { light: { base: "light", tokens: {} }, dark: { base: "dark", tokens: {} } };
   function checkTheme(t) {
@@ -118,7 +121,7 @@ export function createMindmap(el, opts = {}) {
     if (typeof x === "string") { if (!Object.prototype.hasOwnProperty.call(themes, x)) return badTheme(x); name = x; t = themes[x]; }
     else if (x !== null && x !== undefined) { t = checkTheme(x); if (!t) return badTheme(x); }
     for (const k of themeTokens) wrap.style.removeProperty(`--mm-${k}`);
-    themeTokens = []; themeWarnings = []; themeName = name;
+    themeTokens = []; themeWarnings = []; themeName = name; themeInline = name === null && t ? clone(t) : null;
     if (t) wrap.dataset.theme = t.base; else delete wrap.dataset.theme;
     for (const [k, v] of Object.entries(t ? t.tokens : {})) {
       if (!THEME_TOKENS.includes(k)) { themeWarnings.push({ path: `theme.tokens.${k}`, code: "unknown_key", message: `Unknown theme token "${k}" ignored` }); continue; }
@@ -130,6 +133,11 @@ export function createMindmap(el, opts = {}) {
     return { ok: true };
   }
   if (!applyTheme(opts.theme).ok) themeWarnings.push({ path: "theme", code: "bad_theme", message: "Unknown theme ignored; following the OS" });
+  // state.theme (a name, null or an inline {base, tokens}, as getState() gives it) wins over `theme`; applied once,
+  // here, so a later setTheme is never undone when the first valid data arrives.
+  if (opts.state && typeof opts.state === "object" && "theme" in opts.state && !applyTheme(opts.state.theme).ok) {
+    themeWarnings.push({ path: "state.theme", code: "bad_theme", message: "Unknown theme in state ignored" });
+  }
   el.appendChild(wrap);
 
   const svg = doc.createElementNS(SVG_NS, "svg");
@@ -748,7 +756,6 @@ export function createMindmap(el, opts = {}) {
     if (s.focus && idx.has(s.focus)) focusId = idx.get(s.focus).parentId ? s.focus : null;
     if ("filter" in s) { const f = checkFilter(s.filter); if (f.ok) filter = f.value; }
     if (typeof s.filterOnly === "boolean") filterOnly = s.filterOnly;
-    if (s.theme === null || (typeof s.theme === "string" && Object.prototype.hasOwnProperty.call(themes, s.theme))) applyTheme(s.theme);
     if (s.viewport && [s.viewport.x, s.viewport.y, s.viewport.k].every(Number.isFinite) && s.viewport.k > 0) { Object.assign(vp, { x: s.viewport.x, y: s.viewport.y, k: s.viewport.k }); vpSet = vpOwned = true; }
   }
   function firstDraw() {
@@ -834,26 +841,39 @@ export function createMindmap(el, opts = {}) {
     getPath(id) { const e = data && idx.get(id); return e ? e.num : null; },
     find(text) { return data ? findIds(String(text ?? "")) : []; },
     getState() {
-      return { selected, collapsed: [...collapsed], focus: focusId, view, viewport: { ...vp }, search: q, filter: filter ? [...filter] : null, filterOnly, theme: themeName };
+      return { selected, collapsed: [...collapsed], focus: focusId, view, viewport: { ...vp }, search: q, filter: filter ? [...filter] : null, filterOnly, theme: themeInline ? clone(themeInline) : themeName };
     },
-    export(format) {
+    export(format, eopts) {
       if (!data) return null;
       if (format === "json") return JSON.stringify(data, null, 2) + "\n";
       if (format === "outline") return toOutline(data);
       if (format === "mermaid") return toMermaid(data);
       if (format === "svg") {
         const cs = win && win.getComputedStyle ? win.getComputedStyle(wrap) : null;
-        const theme = {};
-        for (const t of TOKENS) { const v = cs && (cs.getPropertyValue(`--mm-${t}`).trim() || cs.getPropertyValue(`--mmd-${t}`).trim()); theme[t] = v || THEME[t]; }
-        // A raw status colour (for example var(--brand)) is resolved by this page: computed colour of a probe element.
-        const out = {};
-        for (const [k, s] of Object.entries(statuses)) {
-          if (s.color === undefined || s.color === null || TOKENS.includes(s.color)) { out[k] = s; continue; }
-          const probe = doc.createElement("span"); probe.style.color = String(s.color); wrap.appendChild(probe);
-          const got = win && win.getComputedStyle ? win.getComputedStyle(probe).color : ""; probe.remove();
-          out[k] = { ...s, color: got || String(s.color) };
-        }
-        return toSVG(data, { view, collapsed, focus: view === "outline" ? null : focusId, measure, theme, statuses: out, strings, badge, links: allLinks ? "all" : "default", filter, limits: opts.limits });
+        // A colour that is not plain colour syntax (var(), color-mix(), ...) is resolved by this page through a probe
+        // element (its computed `color`); colour syntax (#hex, rgb(), names) is written as is. A value the browser does
+        // not take as a colour is left to toSVG, which writes only colour syntax (token: the default palette, status
+        // colour: grey).
+        const probe = doc.createElement("span"); probe.style.display = "none"; wrap.appendChild(probe);
+        const resolve = (css) => {
+          if (isColor(css)) return css.trim();
+          probe.style.color = ""; probe.style.color = css;
+          if (!probe.style.color || !win || !win.getComputedStyle) return null;
+          return win.getComputedStyle(probe).color || null;
+        };
+        const theme = {}, out = {};
+        try {
+          for (const t of TOKENS) {
+            const v = cs && (cs.getPropertyValue(`--mm-${t}`).trim() || cs.getPropertyValue(`--mmd-${t}`).trim());
+            theme[t] = (v && resolve(v)) || THEME[t];
+          }
+          for (const [k, s] of Object.entries(statuses)) {
+            if (s.color === undefined || s.color === null || TOKENS.includes(s.color)) { out[k] = s; continue; }
+            out[k] = { ...s, color: resolve(String(s.color)) || String(s.color) };
+          }
+        } finally { probe.remove(); }
+        const idPrefix = eopts && typeof eopts.idPrefix === "string" ? eopts.idPrefix : undefined;
+        return toSVG(data, { view, collapsed, focus: view === "outline" ? null : focusId, measure, theme, statuses: out, strings, badge, links: allLinks ? "all" : "default", filter, limits: opts.limits, idPrefix });
       }
       return null;
     },

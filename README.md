@@ -1,8 +1,8 @@
 # simple-mindmap
 
 A small mindmap and outline view for the browser. You pass JSON, update it with operations, and listen to events.
-Pure ES modules, **zero runtime dependencies**, no URL of its own (no network access unless you give a status an image
-URL), no `innerHTML`, system fonts only, colours through CSS variables, and every visible string can be replaced.
+Pure ES modules, **zero runtime dependencies**, no URL of its own (the page fetches nothing for the component unless you
+give a status an `image` URL; exported files reference nothing outside themselves), no `innerHTML`, system fonts only, colours through CSS variables, and every visible string can be replaced.
 
 - Three views: **both sides** (the root in the middle), **tree to the right**, and **outline** (nested rows).
 - Three modes: `view` (read only), `select` (select, open, menu actions), `edit` (emits `intent`; you decide and call `apply`).
@@ -102,8 +102,11 @@ SVG export draw the **highest level present**:
 | 6 | (none) | a dot | the same |
 
 - `color` is a token (`green`, `amber`, `red`, `blue`, `purple`, `grey`, or any `--mm-*` colour name) or any CSS colour.
-  `export("svg")` resolves a raw colour in the page (computed `rgb()`), so a `var(--brand)` works; the pure `toSVG` cannot
-  resolve `var()` and draws it grey. The file never contains `var(`.
+- Exported files contain only colour syntax: `#hex`, `rgb()` `rgba()` `hsl()` `hsla()` `hwb()` `lab()` `lch()` `oklab()`
+  `oklch()` `color()`, or a colour name. `export("svg")` resolves anything else in the page (computed colour), so
+  `var(--brand)` and `color-mix(...)` work there, for status colours and theme tokens alike. The pure `toSVG` cannot
+  resolve them: a token falls back to the default palette and a status colour to grey. So a file never contains `var(`
+  or a `url(` other than its own `#` markers.
 - `strike: true` strikes the title through and fades it (the default `superseded` has it); `shape: "superseded"` implies it.
 - **Your entry decides the icon.** Each key is merged with the default of the same key, but an entry that sets any icon
   field (`render`, `image`, `icon`, `path`, `shape`, `symbol`) drops every inherited one: `decided: {symbol: "*"}` draws `*`,
@@ -115,14 +118,20 @@ SVG export draw the **highest level present**:
   bad `viewBox` (default `0 0 24 24`): the next level draws. `stroke: true` gives the Lucide look: no fill, stroke in the
   status colour, width 2, round caps and joins.
 - `image` accepts `data:image/(png|jpeg|gif|webp|svg+xml)`, `https:`, `http:`, `blob:` and relative URLs; anything else
-  (`javascript:`, `file:`, ...) is ignored. The browser fetches an `image` URL because you chose it; under a CSP it needs
-  `img-src` for that origin (`data:` for data URLs).
+  (`javascript:`, `file:`, ...) is ignored. A protocol-relative `//host/x.png` counts as relative: the page fetches it from
+  that host. The browser fetches an `image` URL because you chose it; under a CSP it needs `img-src` for that origin
+  (`data:` for data URLs).
+- An icon node without the geometry it needs (`d` of a path, `r` of a circle, `rx`/`ry`, `width`/`height`, `x1`..`y2`,
+  `points`), for example because its only value was rejected, is dropped; an icon with nothing left draws the next level.
 - A `render` that throws or returns something other than an Element: the next level draws and the component emits one
   `error {message, status}` per status per draw.
 - Each `icon`, `path` or `image` used in a view is defined **once**, as a `<symbol>` in `<defs>`, and every node draws a
   `<use href="#...">` of it (map, outline and export alike; built-in shapes and text symbols stay inline). Ids are
-  `mm<n>-s-<i>` (map) and `mm<n>-os-<i>` (outline), with `<n>` unique per component on the page, and `mm-s-<i>` in the
-  export; they never contain the status key. For 2 000 nodes that all show a Lucide icon (`toSVG` with the test text measure), the
+  `mm<n>-s-<i>` (map) and `mm<n>-os-<i>` (outline), with `<n>` unique per component on the page (also across two copies
+  of the library loaded from different URLs), and `mm-s-<i>` in the export; they never contain the status key. The
+  export prefix is fixed so the bytes stay deterministic: when you inline several exported files into one page, give each
+  its own with `toSVG(json, {idPrefix})` or `mm.export("svg", {idPrefix})` (`[A-Za-z][A-Za-z0-9_-]{0,31}`; markers become
+  `<prefix>-arrow-<type>`). For 2 000 nodes that all show a Lucide icon (`toSVG` with the test text measure), the
   export is 1 287 334 bytes, against 1 653 799 bytes with the icon repeated per node.
 - `statusIcon(statusKey, statuses?, theme?)` (from `simple-mindmap`) returns the same icon as a standalone 12 x 12 `<svg>`
   string with the export rules, for your own legend or filter chips. `statuses` as you pass them to `createMindmap`.
@@ -145,7 +154,7 @@ const mm = createMindmap(el, {
   data,                      // JSON as above
   view: "both",              // "both" | "right" | "outline"
   mode: "view",              // "view" | "select" | "edit"
-  state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search, filter, filterOnly, theme}; state.view and state.theme win over `view` and `theme`
+  state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search, filter, filterOnly, theme}; state.view and state.theme win over `view` and `theme` (state.theme is applied once, at creation)
   collapseDepth: null,       // collapse every node at this depth (root = 0) when there is no `state`
   actions: [],               // menu items of a node: [{id, label, icon?, when?(node) -> bool}]; icon: a short text symbol or an icon object ({viewBox?, nodes, stroke?}, as for statuses)
   strings: {},               // every visible text (see "Strings")
@@ -175,8 +184,8 @@ const mm = createMindmap(el, {
 | `mm.getNode(id)` | `{id, path, parent, children: [ids], node: {id, title, note?, status?, tone?, collapsed?, meta?}}` (a copy) or `null` |
 | `mm.getPath(id)` | `"3.2"` (root: `""`) or `null` |
 | `mm.find(q)` | ids that match, same rule as the search box |
-| `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search, filter, filterOnly, theme}` (`theme`: the theme name, or `null` for the OS or an inline theme) |
-| `mm.export(fmt)` | `"json"`, `"outline"` (Markdown), `"mermaid"`, `"svg"` (the current view, measured by this page, concrete colours); `null` before valid data |
+| `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search, filter, filterOnly, theme}` (`theme`: the theme name, `null` for the OS, or a copy `{base, tokens}` of an inline theme) |
+| `mm.export(fmt, {idPrefix}?)` | `"json"`, `"outline"` (Markdown), `"mermaid"`, `"svg"` (the current view, measured by this page, concrete colours; `idPrefix` starts every id in the file, default `mm`); `null` before valid data |
 | `mm.errors` / `mm.warnings` | the last validation result (copies); `warnings` also lists ignored themes and theme tokens (`themes.<name>`, `theme.tokens.<name>`, `theme`) |
 | `mm.on(event, fn)` | returns a function that removes the listener |
 | `mm.destroy()` | removes the component and every listener |
@@ -320,7 +329,7 @@ Themes are not limited to light and dark. There are two ways, and they combine:
   mm.setTheme("midnight");      // {ok: true}; mm.getState().theme === "midnight"
   mm.setTheme("nope");          // {ok: false, errors: [{code: "bad_theme", path: "theme", ...}]}, nothing changes
   mm.setTheme(null);            // the built-in light / dark, following the OS
-  mm.setTheme({ base: "dark", tokens: { bg: "#000" } }); // inline, unnamed (getState().theme === null)
+  mm.setTheme({ base: "dark", tokens: { bg: "#000" } }); // inline (getState().theme is a copy of it)
   ```
 
   `base` ("light" by default) is the palette under every token the theme does not set; it becomes `data-theme` on the
