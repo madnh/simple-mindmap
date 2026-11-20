@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. The project follows [Semantic Versioning](https://semver.org/);
 the API, operations, events and error codes described in the README are the 1.x contract.
 
+## 1.1.0
+
+Added (all additive; data format, operations, validation, outline / Mermaid output and events are unchanged):
+- Status icons: `render` (your element, once per status per draw), `image` (data:, https:, http:, blob:, relative URLs),
+  `icon` `{viewBox, nodes, stroke}` in the Lucide `IconNode` format (whitelisted SVG geometry, 64 nodes, 8 KiB per `d`),
+  `path` sugar, then `shape` / `symbol` / dot. The export skips `render` and non-`data:` images.
+- `strike: true` on any status (the default `superseded` has it).
+- `mm.setTheme(mode | {mode, tokens})`, `theme: {mode, tokens}` at creation (tokens become `--mm-<token>`).
+- `mm.setStatusStyle(key, style)` for an existing status, keeping viewport, collapse and selection.
+- `actions[].icon` accepts an icon object.
+- `statusIcon(statusKey, statuses, theme)`: the export icon as a standalone `<svg>` string.
+- devDependency lucide 1.76.0 (ISC) for tests and the demo; the library never imports it.
+
+Fixed:
+- A host `symbol` on a default status key was ignored (the inherited `shape` won). An entry that sets any icon field now
+  replaces every inherited icon field; `label`, `color` and `strike` still inherit.
+- A raw `var(...)` status colour leaked into the SVG export. `export("svg")` now resolves it in the page; `toSVG` draws it
+  grey.
+
 ## 1.0.2
 
 - Tests only, no runtime change. The repository font test also reads the `font:` shorthand, `fontFamily =` and canvas

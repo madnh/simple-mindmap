@@ -37,6 +37,17 @@ test("src: imports are relative to src only (zero runtime dependencies)", () => 
   assert.equal(pkg.license, "MIT");
 });
 
+test("src: never imports or names lucide (a devDependency for tests and the demo only); it is pinned exactly", () => {
+  let n = 0;
+  for (const [, s] of SRC) n += (s.match(/lucide/gi) || []).length;
+  assert.equal(n, 0, "src mentions lucide");
+  const pkg = JSON.parse(readFileSync(ROOT + "package.json", "utf8"));
+  assert.match(pkg.devDependencies.lucide, /^\d+\.\d+\.\d+$/, "lucide is pinned to one exact version");
+  const lock = JSON.parse(readFileSync(ROOT + "package-lock.json", "utf8"));
+  assert.equal(lock.packages["node_modules/lucide"].version, pkg.devDependencies.lucide);
+  assert.ok(readFileSync(ROOT + "README.md", "utf8").includes(`| lucide | ${pkg.devDependencies.lucide} | ISC |`), "README devDependency licence row");
+});
+
 test("src: ASCII only (every visible string is English and goes through `strings`)", () => {
   for (const [p, s] of SRC) assert.ok(!/[^\t\n\x20-\x7e]/.test(s), p);
 });

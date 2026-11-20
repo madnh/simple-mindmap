@@ -108,6 +108,9 @@
 .simple-mindmap .mm-arrow[aria-expanded="true"] { transform: rotate(90deg); }
 .simple-mindmap .mm-arrow-pad { flex: none; width: 16px; }
 .simple-mindmap .mm-sym { flex: none; width: 12px; height: 12px; margin-top: 3px; overflow: visible; }
+.simple-mindmap span.mm-sym { display: inline-flex; align-items: center; justify-content: center; }
+.simple-mindmap span.mm-sym > * { max-width: 12px; max-height: 12px; }
+.simple-mindmap .mm-menu .mm-icon svg { width: 12px; height: 12px; vertical-align: -1px; overflow: visible; }
 @media (prefers-reduced-motion: no-preference) {
   .simple-mindmap .mm-viewport.is-animating { transition: transform 180ms ease-out; }
 }

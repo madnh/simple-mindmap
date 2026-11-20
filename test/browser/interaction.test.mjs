@@ -518,3 +518,197 @@ t("getNode() returns a copy: changing it changes neither the data nor the pictur
   assert.deepEqual(r.again, { id: "b", path: "2", parent: "r", children: [], node: { id: "b", title: "Beta", status: "pending", meta: { by: "x" } } });
   assert.ok(r.text.includes("Beta") && !r.text.includes("MUTATED"));
 });
+
+// ---- 1.1: status icons, theming ----
+const PNG = "data:image/png;base64,iVBORw0KGgo=";
+const ICONS = { root: { id: "r", title: "Root", children: [
+  { id: "a", title: "Icon", status: "decided" }, { id: "b", title: "Image", status: "pending" }, { id: "c", title: "Render", status: "open" },
+  { id: "d", title: "Symbol", status: "parked" }, { id: "e", title: "Superseded", status: "superseded" }, { id: "f", title: "Dropped", status: "dropped" },
+  { id: "g", title: "Plain", status: "blocked" },
+] } };
+const ICON_STATUSES = `{
+  decided: { icon: { nodes: [["path", { d: "M1 1L11 11" }]], viewBox: "0 0 12 12" } },
+  pending: { image: ${JSON.stringify(PNG)} },
+  open: { render: (k) => { const e = document.createElementNS("http://www.w3.org/2000/svg", "circle"); e.setAttribute("class", "custom-" + k); e.setAttribute("r", "5"); return e; } },
+  parked: { symbol: "P" },
+  superseded: { icon: { nodes: [["circle", { cx: 12, cy: 12, r: 6 }]] } },
+  dropped: { label: "Dropped", symbol: "x", strike: true },
+  blocked: {},
+}`;
+
+t("map and outline draw the same icon levels (icon, image, render, symbol over an inherited shape); strike follows `strike`", async () => {
+  const r = await ev(`
+    make({ data: ${JSON.stringify(ICONS)}, view: "right", statuses: ${ICON_STATUSES} });
+    await new Promise((r) => setTimeout(r, 0));
+    const q = (id, sel) => document.querySelector('#host [data-id="' + id + '"] ' + sel);
+    const map = {
+      icon: !!q("a", ".mm-status svg path[d='M1 1L11 11']"), image: q("b", ".mm-status image")?.getAttribute("href"),
+      render: !!q("c", ".mm-status .mm-status-render circle.custom-open"),
+      symbol: [...document.querySelectorAll('#host [data-id="d"] .mm-status text')].map((t) => t.textContent),
+      plain: !!q("g", ".mm-status circle"),
+      strike: ["e", "f", "d"].map((id) => document.querySelector('#host [data-id="' + id + '"]').classList.contains("is-superseded")),
+    };
+    mm.setView("outline");
+    await new Promise((r) => setTimeout(r, 0));
+    const row = (id) => document.querySelector('#host li[data-id="' + id + '"] > .mm-row');
+    const outline = {
+      icon: !!row("a").querySelector("svg.mm-sym svg path[d='M1 1L11 11']"), image: row("b").querySelector("img.mm-sym")?.getAttribute("src"),
+      render: !!row("c").querySelector("span.mm-sym-render circle.custom-open"),
+      symbol: row("d").querySelector("svg.mm-sym text")?.textContent,
+      strike: ["e", "f", "d"].map((id) => row(id).classList.contains("is-superseded")),
+    };
+    return { map, outline, errors: events.filter((x) => x.e === "error").length };`);
+  assert.deepEqual(r.map, { icon: true, image: PNG, render: true, symbol: ["P"], plain: true, strike: [true, true, false] });
+  assert.deepEqual(r.outline, { icon: true, image: PNG, render: true, symbol: "P", strike: [true, true, false] });
+  assert.equal(r.errors, 0);
+});
+
+t("status render(): once per status key per draw (copied per node), never for the export; a throw or a non-Element falls back with one error per key per draw", async () => {
+  const r = await ev(`
+    window.calls = {};
+    const count = (k) => { window.calls[k] = (window.calls[k] || 0) + 1; };
+    const kids = [];
+    for (let i = 0; i < 6; i++) kids.push({ id: "d" + i, title: "D" + i, status: "decided" });
+    for (let i = 0; i < 3; i++) kids.push({ id: "b" + i, title: "B" + i, status: "blocked" });
+    for (let i = 0; i < 2; i++) kids.push({ id: "o" + i, title: "O" + i, status: "open" });
+    make({ data: { root: { id: "r", title: "R", children: kids } }, view: "right", statuses: {
+      decided: { render: (k) => { count(k); const e = document.createElementNS("http://www.w3.org/2000/svg", "rect"); e.setAttribute("class", "custom"); return e; } },
+      blocked: { symbol: "!", render: () => { count("blocked"); throw new Error("boom"); } },
+      open: { symbol: "?", render: () => { count("open"); return "not an element"; } },
+    } });
+    await new Promise((r) => setTimeout(r, 0));
+    const host = document.getElementById("host");
+    const errs = () => events.filter((x) => x.e === "error").map((x) => x.p.status);
+    const texts = (p) => [...host.querySelectorAll('[data-id^="' + p + '"] .mm-status text')].map((t) => t.textContent);
+    const first = { calls: { ...window.calls }, custom: host.querySelectorAll(".mm-node .custom").length, bang: texts("b"), q: texts("o"), errors: errs() };
+    mm.setFilter(["decided"]); // one more draw
+    const second = { calls: { ...window.calls }, errors: errs() };
+    const svg = mm.export("svg");
+    return { first, second, after: { ...window.calls }, exp: svg.includes("custom") || svg.includes("foreignObject"), msg: events.find((x) => x.e === "error").p.message };`);
+  const f = r.first, s = r.second;
+  assert.equal(f.custom, 6, "every node gets its copy");
+  assert.ok(f.calls.decided >= 1 && f.calls.decided < 6, `render called ${f.calls.decided} times for 6 nodes`);
+  assert.equal(f.calls.blocked, f.calls.decided); assert.equal(f.calls.open, f.calls.decided);
+  assert.deepEqual(f.bang, ["!", "!", "!"]); assert.deepEqual(f.q, ["?", "?"]);
+  assert.equal(f.errors.filter((k) => k === "blocked").length, f.calls.blocked, "one error per key per draw");
+  assert.equal(f.errors.filter((k) => k === "open").length, f.calls.open);
+  assert.equal(s.calls.decided, f.calls.decided + 1);
+  assert.equal(s.errors.length, f.errors.length + 2);
+  assert.deepEqual(r.after, s.calls, "export does not call render");
+  assert.equal(r.exp, false);
+  assert.ok(r.msg.includes("boom"));
+});
+
+t("theme: setTheme and the tokens map set the palette with no event and no redraw; export colours follow; unknown tokens warn", async () => {
+  const r = await ev(`
+    make({ data: ${JSON.stringify(SMALL)}, theme: { mode: "dark", tokens: { "node-bg": "#010203", nonsense: "#fff", bg: 5 } } });
+    await new Promise((r) => setTimeout(r, 0));
+    const w = document.querySelector("#host .simple-mindmap");
+    const n0 = events.length;
+    const node = document.querySelector('#host [data-id="a"]');
+    const out = { mode0: w.dataset.theme, exp0: mm.export("svg"), warn0: mm.warnings.map((x) => [x.path, x.code]) };
+    out.set1 = mm.setTheme("light"); out.mode1 = w.dataset.theme; out.exp1 = mm.export("svg");
+    out.set2 = mm.setTheme(null); out.mode2 = w.dataset.theme ?? null;
+    out.set3 = mm.setTheme({ tokens: { bg: "#0a0b0c" } }); out.exp3 = mm.export("svg"); out.warn3 = mm.warnings.length;
+    out.bad = [mm.setTheme("blue"), mm.setTheme(42), mm.setTheme({ tokens: "x" })];
+    out.sameNode = node === document.querySelector('#host [data-id="a"]');
+    out.events = events.slice(n0).map((x) => x.e);
+    return out;`);
+  assert.equal(r.mode0, "dark");
+  assert.ok(r.exp0.includes("#010203") && r.exp0.includes("#0d1117"), "dark palette plus the token");
+  assert.deepEqual(r.warn0, [["theme.tokens.nonsense", "unknown_key"], ["theme.tokens.bg", "bad_value"]]);
+  assert.equal(r.set1, true); assert.equal(r.mode1, "light");
+  assert.ok(r.exp1.includes("#ffffff") && !r.exp1.includes("#010203"), "setTheme replaces the tokens set before");
+  assert.equal(r.set2, true); assert.equal(r.mode2, null);
+  assert.equal(r.set3, true); assert.ok(r.exp3.includes("#0a0b0c")); assert.equal(r.warn3, 0);
+  assert.deepEqual(r.bad, [false, false, false]);
+  assert.equal(r.sameNode, true, "no redraw");
+  assert.deepEqual(r.events, []);
+});
+
+t("export: a raw var() status colour is resolved by the page (computed rgb); the file never contains var(", async () => {
+  const r = await ev(`
+    const host = document.getElementById("host");
+    host.style.setProperty("--brand", "#123456");
+    try {
+      make({ data: ${JSON.stringify(SMALL)}, statuses: { decided: { color: "var(--brand)" }, pending: { color: "var(--brand)", icon: { nodes: [["circle", { cx: 12, cy: 12, r: 8 }]], stroke: true } } } });
+      const svg = mm.export("svg");
+      return { vars: svg.split("var(").length - 1, rgb: svg.split("rgb(18, 52, 86)").length - 1 };
+    } finally { host.style.removeProperty("--brand"); }`);
+  assert.equal(r.vars, 0);
+  assert.equal(r.rgb, 2, "both statuses drawn with the resolved colour");
+});
+
+t("setStatusStyle: restyles an existing status, keeping viewport, collapse and selection; unknown key -> bad_status; no event", async () => {
+  await make({ mode: "select" });
+  const r = await ev(`
+    mm.select("b"); mm.collapse("a"); mm.fit();
+    const st0 = JSON.stringify(mm.getState());
+    const n0 = events.length;
+    const ok = mm.setStatusStyle("decided", { color: "red", icon: { nodes: [["circle", { cx: 12, cy: 12, r: 8 }]] } });
+    const st1 = JSON.stringify(mm.getState());
+    const icon = !!document.querySelector('#host [data-id="a"] .mm-status svg circle[r="8"]');
+    const shape = !!document.querySelector('#host [data-id="a"] .mm-status path');
+    const label = mm.export("svg").includes("<title>Decided</title>");
+    const back = mm.setStatusStyle("decided", { icon: null, shape: "decided" });
+    const check = !!document.querySelector('#host [data-id="a"] .mm-status path');
+    return { ok, back, same: st0 === st1, icon, shape, label, check, unknown: mm.setStatusStyle("nope", { color: "red" }), notObj: mm.setStatusStyle("decided", "red"), events: events.slice(n0).map((x) => x.e) };`);
+  assert.deepEqual(r.ok, { ok: true }); assert.deepEqual(r.back, { ok: true });
+  assert.ok(r.same, "state kept");
+  assert.equal(r.icon, true); assert.equal(r.shape, false, "the inherited shape is replaced");
+  assert.equal(r.label, true, "label inherits");
+  assert.equal(r.check, true);
+  assert.equal(r.unknown.ok, false); assert.equal(r.unknown.errors[0].code, "bad_status");
+  assert.equal(r.notObj.ok, false); assert.equal(r.notObj.errors[0].code, "bad_status");
+  assert.deepEqual(r.events, []);
+});
+
+t("actions[].icon: an icon object draws an svg before the label; a string stays text; a rejected icon draws none", async () => {
+  await ev(`make({ data: ${JSON.stringify(SMALL)}, mode: "select", actions: [
+    { id: "x", label: "X", icon: { nodes: [["path", { d: "M1 1L11 11" }], ["script", {}]], viewBox: "0 0 12 12" } },
+    { id: "y", label: "Y", icon: "*" }, { id: "z", label: "Z", icon: { nodes: [["script", {}]] } }] })`);
+  const c = await center("b");
+  await page.click(c.x, c.y);
+  const more = await page.eval("(() => { const r = document.querySelector('#host .mm-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
+  await page.click(more.x, more.y);
+  const items = await page.eval(`[...document.querySelectorAll('#host .mm-menu button')].slice(0, 3).map((b) => ({
+    text: b.textContent, svg: !!b.querySelector(".mm-icon svg path[d='M1 1L11 11']"), script: !!b.querySelector("script"), icon: b.querySelector(".mm-icon")?.textContent ?? null }))`);
+  assert.deepEqual(items, [
+    { text: "X", svg: true, script: false, icon: "" },
+    { text: "*Y", svg: false, script: false, icon: "*" },
+    { text: "Z", svg: false, script: false, icon: null },
+  ]);
+});
+
+t("Lucide in the page: icon {nodes, stroke} and render via lucide createElement draw; 2 000 nodes draw time with a render() status printed", async () => {
+  const r = await ev(`
+    const L = await import("/node_modules/lucide/dist/esm/lucide.mjs");
+    make({ data: ${JSON.stringify(SMALL)}, view: "right", statuses: {
+      decided: { color: "green", icon: { nodes: L.CircleCheck, stroke: true } },
+      pending: { color: "amber", render: () => L.createElement(L.Hourglass, { width: 12, height: 12 }) },
+    } });
+    await new Promise((r) => setTimeout(r, 0));
+    const a = document.querySelector('#host [data-id="a"] .mm-status svg');
+    const b = document.querySelector('#host [data-id="b"] .mm-status .mm-status-render svg');
+    const out = { a: a && ["viewBox", "fill", "stroke-width", "stroke-linecap", "stroke-linejoin"].map((k) => a.getAttribute(k)), aKids: a ? a.children.length : 0, b: !!b && b.getAttribute("stroke") };
+    const data = await fixture("large-2000.json");
+    const expandAll = () => mm.apply(mm.getState().collapsed.map((id) => ({ op: "expand", id })));
+    const time = (statuses) => {
+      make({ data, view: "right", statuses });
+      expandAll();
+      const t0 = performance.now(); mm.setFilter(null); return performance.now() - t0;
+    };
+    const keys = ["open", "pending", "decided", "parked", "blocked", "superseded"];
+    window.calls = 0;
+    out.plain = time(null);
+    out.render = time(Object.fromEntries(keys.map((k) => [k, { render: () => { window.calls++; return L.createElement(L.Check, { width: 12, height: 12 }); } }])));
+    out.nodes = document.querySelectorAll("#host .mm-node").length;
+    out.calls = window.calls;
+    return out;`);
+  assert.deepEqual(r.a, ["0 0 24 24", "none", "2", "round", "round"]);
+  assert.equal(r.aKids, 2);
+  assert.equal(r.b, "currentColor");
+  assert.equal(r.nodes, 2000);
+  assert.ok(r.calls <= 6 * 4, `render called ${r.calls} times for 2 000 nodes over the draws of this test`);
+  console.log(`# browser 2000 nodes, one redraw (right view): built-in shapes ${r.plain.toFixed(0)} ms; every status through render() ${r.render.toFixed(0)} ms (${r.calls} render calls)`);
+});

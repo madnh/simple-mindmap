@@ -1,8 +1,8 @@
 # simple-mindmap
 
 A small mindmap and outline view for the browser. You pass JSON, update it with operations, and listen to events.
-Pure ES modules, **zero runtime dependencies**, no network access, no `innerHTML`, system fonts only, colours through
-CSS variables, and every visible string can be replaced.
+Pure ES modules, **zero runtime dependencies**, no URL of its own (no network access unless you give a status an image
+URL), no `innerHTML`, system fonts only, colours through CSS variables, and every visible string can be replaced.
 
 - Three views: **both sides** (the root in the middle), **tree to the right**, and **outline** (nested rows).
 - Three modes: `view` (read only), `select` (select, open, menu actions), `edit` (emits `intent`; you decide and call `apply`).
@@ -86,6 +86,52 @@ not a field of the data.
 | `blocked` | Blocked | red crossed ring |
 | `superseded` | Superseded | grey dash, title struck through and faded |
 
+### Status icons
+
+A status entry is `{label, color?, strike?, render?, image?, icon?, path?, shape?, symbol?}`. The map, the outline and the
+SVG export draw the **highest level present**:
+
+| Level | Field | Map and outline | SVG export |
+|---|---|---|---|
+| 1 | `render: (statusKey, status) => Element` | your element, called **once per status per draw** and copied per node; an SVG element is appended as is, any other element is wrapped in `<foreignObject>` (map) or a `<span>` (outline) | never called: the next level |
+| 2 | `image: url` | `<image>` (map) / `<img>` (outline), 12 x 12 | embedded only for a `data:` URL; any other URL: the next level |
+| 3 | `icon: {viewBox?, nodes, stroke?}` | a nested 12 x 12 `<svg>` | the same |
+| 3 | `path: "M..."` | sugar for `icon: {viewBox: "0 0 12 12", nodes: [["path", {d}]]}`, filled with the colour | the same |
+| 4 | `shape` | one of the six built-in symbols (`open`, `pending`, `decided`, `parked`, `blocked`, `superseded`) | the same |
+| 5 | `symbol` | a short text symbol | the same |
+| 6 | (none) | a dot | the same |
+
+- `color` is a token (`green`, `amber`, `red`, `blue`, `purple`, `grey`, or any `--mm-*` colour name) or any CSS colour.
+  `export("svg")` resolves a raw colour in the page (computed `rgb()`), so a `var(--brand)` works; the pure `toSVG` cannot
+  resolve `var()` and draws it grey. The file never contains `var(`.
+- `strike: true` strikes the title through and fades it (the default `superseded` has it); `shape: "superseded"` implies it.
+- **Your entry decides the icon.** Each key is merged with the default of the same key, but an entry that sets any icon
+  field (`render`, `image`, `icon`, `path`, `shape`, `symbol`) drops every inherited one: `decided: {symbol: "*"}` draws `*`,
+  not the built-in check. `label`, `color` and `strike` still inherit.
+- `icon.nodes` is the Lucide `IconNode` format: `[[tag, attrs, children?], ...]`. Tags: `path`, `circle`, `ellipse`, `line`,
+  `rect`, `polyline`, `polygon`, `g` (nested `g` too). Attributes: `d`, `cx`, `cy`, `r`, `x`, `y`, `width`, `height`, `rx`, `ry`,
+  `x1`, `y1`, `x2`, `y2`, `points`, and `fill` only as `currentColor` (the status colour) or `none`. Every other tag or
+  attribute (`href`, `on*`, `style`, `transform`, `url(...)`) is dropped. More than 64 nodes, a `d` longer than 8 KiB, or a
+  bad `viewBox` (default `0 0 24 24`): the next level draws. `stroke: true` gives the Lucide look: no fill, stroke in the
+  status colour, width 2, round caps and joins.
+- `image` accepts `data:image/(png|jpeg|gif|webp|svg+xml)`, `https:`, `http:`, `blob:` and relative URLs; anything else
+  (`javascript:`, `file:`, ...) is ignored. The browser fetches an `image` URL because you chose it; under a CSP it needs
+  `img-src` for that origin (`data:` for data URLs).
+- A `render` that throws or returns something other than an Element: the next level draws and the component emits one
+  `error {message, status}` per status per draw.
+- `statusIcon(statusKey, statuses?, theme?)` (from `simple-mindmap`) returns the same icon as a standalone 12 x 12 `<svg>`
+  string with the export rules, for your own legend or filter chips. `statuses` as you pass them to `createMindmap`.
+
+Lucide (or any icon set in the same format) plugs in directly:
+
+```js
+import { Check, Hourglass, createElement } from "lucide";
+createMindmap(el, { data, statuses: {
+  decided: { label: "Done", color: "green", icon: { nodes: Check, stroke: true } },
+  pending: { label: "Waiting", color: "amber", render: () => createElement(Hourglass, { width: 12, height: 12 }) },
+} });
+```
+
 ## API
 
 ```js
@@ -96,13 +142,13 @@ const mm = createMindmap(el, {
   mode: "view",              // "view" | "select" | "edit"
   state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search, filter, filterOnly}; state.view wins over `view`
   collapseDepth: null,       // collapse every node at this depth (root = 0) when there is no `state`
-  actions: [],               // menu items of a node: [{id, label, icon?, when?(node) -> bool}]; icon is a short text symbol drawn before the label
+  actions: [],               // menu items of a node: [{id, label, icon?, when?(node) -> bool}]; icon: a short text symbol or an icon object ({viewBox?, nodes, stroke?}, as for statuses)
   strings: {},               // every visible text (see "Strings")
-  statuses: {},              // {key: {label, shape?, symbol?, color?}}; replaces the default six when given
+  statuses: {},              // {key: {label, color?, strike?, render?, image?, icon?, path?, shape?, symbol?}}; replaces the default six when given (see "Status icons")
   badge: null,               // (node) -> {symbol, label} | null; a small extra mark you decide; called on every draw
   search: true, tools: true, // the floating search box and the tools; turn off when you draw your own
   limits: null,              // tighter limits: {nodes, depth, title, label, note, meta}
-  theme: null,               // "light" | "dark" to force a palette; default follows prefers-color-scheme
+  theme: null,               // "light" | "dark" to force a palette, or {mode?, tokens: {bg: "#...", ...}}; default follows prefers-color-scheme
   filter: null,              // null or a list of statuses: nodes whose status is not listed are dimmed (never hidden)
   filterOnly: false,         // outline only: with a filter, hide branches that contain no matching node
 });
@@ -116,6 +162,8 @@ const mm = createMindmap(el, {
 | `mm.focusSearch()` | puts the cursor in the search box of the open view (what Cmd/Ctrl+F does inside the component), for a host shortcut. `false` when there is no data or `search: false` |
 | `mm.setFilter(list \| null)` | dims every node whose status is not in `list` (a node without status never matches); returns `{ok: true}`, or `{ok: false, errors}` with `bad_status` for an unknown status (nothing changes) |
 | `mm.setFilterOnly(bool)` | outline: hide branches without a match while a filter is set; returns `{ok: true}` |
+| `mm.setTheme("light" \| "dark" \| null \| {mode?, tokens})` | replaces the theme set so far (see "Theming"); no redraw, no event; returns `false` for a value it does not accept |
+| `mm.setStatusStyle(key, {label?, color?, strike?, icon?, path?, image?, render?, symbol?, shape?})` | restyles an existing status and redraws, keeping viewport, collapse and selection; an icon field replaces the current icon, `null` clears a field; no event. Returns `{ok: true}`, or `{ok: false, errors}` with `bad_status` for an unknown key (the set of keys is fixed at creation) |
 | `mm.search(q)` `mm.next()` `mm.prev()` | `{hits: [ids], index}`; matches titles (case and accent insensitive) and position numbers, never internal ids |
 | `mm.getData()` | a deep copy of the current data (no view state), or `null` before any valid data |
 | `mm.getNode(id)` | `{id, path, parent, children: [ids], node: {id, title, note?, status?, tone?, collapsed?, meta?}}` (a copy) or `null` |
@@ -123,7 +171,7 @@ const mm = createMindmap(el, {
 | `mm.find(q)` | ids that match, same rule as the search box |
 | `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search, filter, filterOnly}` |
 | `mm.export(fmt)` | `"json"`, `"outline"` (Markdown), `"mermaid"`, `"svg"` (the current view, measured by this page, concrete colours); `null` before valid data |
-| `mm.errors` / `mm.warnings` | the last validation result (copies) |
+| `mm.errors` / `mm.warnings` | the last validation result (copies); `warnings` also lists ignored theme tokens (`theme.tokens.<name>`) |
 | `mm.on(event, fn)` | returns a function that removes the listener |
 | `mm.destroy()` | removes the component and every listener |
 
@@ -166,7 +214,7 @@ with the index of the failing op (or `null` when the final check failed) and not
   input, never from your calls to `apply`, `setData`, `select` and the other methods.
   A user click on a node emits `select` even when it was already selected. When the user collapses a branch that holds
   the selection, the selection moves to that branch: `toggle` is followed by `select {id}` of the new selection.
-- **State events** (`invalid {errors, source, index?}`, `error {message}`) are emitted for your calls too. Events raised while
+- **State events** (`invalid {errors, source, index?}`, `error {message, status?}`) are emitted for your calls too. Events raised while
   `createMindmap` runs are delivered right after it returns, so a listener added on the next line receives them.
 - Enter in the search box goes to the next match (Shift+Enter: previous) and never emits `open`.
 - Events carry ids, never DOM nodes or data copies; call `getNode(id)` when you need the data.
@@ -248,12 +296,20 @@ set them on `.simple-mindmap` or on any ancestor (for example your app's own the
 `--mm-bg`, `--mm-text`, `--mm-muted`, `--mm-node-bg`, `--mm-node-border`, `--mm-root-bg`, `--mm-root-text`, `--mm-select`,
 `--mm-hit`, `--mm-hit-current`, `--mm-chip-bg`, `--mm-green`, `--mm-amber`, `--mm-red`, `--mm-blue`, `--mm-purple`,
 `--mm-grey`, `--mm-link-blocks`, `--mm-link-supersedes`, `--mm-link-relates`, `--mm-edge-0` ... `--mm-edge-7`,
-`--mm-font`, `--mm-mono`.
+`--mm-font`, `--mm-mono` (28 colour tokens plus 2 font variables).
 
 A dark palette applies under `prefers-color-scheme: dark` unless `data-theme="light"`; `theme: "dark"` forces it.
 A `--mm-*` value you set always wins over both palettes. The defaults live in private `--mmd-*` variables, which are
 internal and not part of the 1.x API.
-`export("svg")` reads the current values, so the file has concrete colours and opens anywhere.
+
+- At runtime: `mm.setTheme("dark")`, `mm.setTheme("light")`, `mm.setTheme(null)` (follow the OS). Setting or removing
+  `data-theme` on the component element by hand works the same way. Nothing is redrawn: every colour is a CSS variable.
+- Without writing CSS: `theme: {mode: "light", tokens: {bg: "#fbf7ef", "node-bg": "#fffdf8", "edge-0": "#b5651d"}}` sets
+  `--mm-<token>` on the component (token names as above without `--mm-`, plus `font` and `mono`); `mm.setTheme` takes the same
+  object and replaces the tokens set before. Unknown names are ignored and listed in `mm.warnings`.
+- `export("svg")` reads the computed values, so the file follows the live theme (palette, tokens, your CSS) with concrete
+  colours and opens anywhere.
+- The palettes are exported as `THEME` and `DARK_THEME`: `toSVG(json, {theme: DARK_THEME})` is a dark file without a page.
 
 ## Strings
 
@@ -268,8 +324,10 @@ Every visible text comes from `strings` (English defaults). A value is a string 
 
 - Titles, labels, badges and error messages are set with `textContent` / SVG `<text>`; nothing is parsed as HTML.
 - Notes are never drawn by the component (they are untrusted Markdown; draw them in your own sandbox).
-- No network access, no `eval`, no external fonts. The only inline style is the injected `<style>` element plus CSSOM
-  style properties, so a CSP needs `style-src 'unsafe-inline'` (or a hash of the stylesheet).
+- No URL of its own, no `eval`, no external fonts. The only fetch the browser makes for the component is a status `image`
+  URL you chose (CSP `img-src`). The only inline style is the injected `<style>` element plus CSSOM style properties, so a
+  CSP needs `style-src 'unsafe-inline'` (or a hash of the stylesheet).
+- Status icons are whitelisted SVG geometry (see "Status icons"); `render` elements are yours and are never exported.
 
 ## Demo
 
@@ -277,15 +335,22 @@ Browsers refuse ES module imports from `file://` pages, so the demo is served by
 dependencies, listens on 127.0.0.1 only):
 
 ```sh
+npm ci                       # the demo loads lucide from node_modules (status icon panel)
 node demo/serve.mjs          # or: npm run demo
 # open http://127.0.0.1:8765/demo/
 ```
 
 ## Development
 
-Nothing to install: there are no dependencies and no devDependencies.
+There are no runtime dependencies. One devDependency, pinned exactly, is used by the tests and the demo only (the
+library never imports it); install it first:
+
+| devDependency | Version | Licence | Source |
+|---|---|---|---|
+| lucide | 1.76.0 | ISC | https://github.com/lucide-icons/lucide |
 
 ```sh
+npm ci                   # installs lucide from package-lock.json; the Lucide tests FAIL (not skip) without it
 npm test                 # node --test test/unit/  (model, ops, layout with a fake measure, svg, export, validate, repo rules)
 npm run test:browser     # headless Chrome through the DevTools protocol, real mouse and keyboard input
 npm run test:all         # both

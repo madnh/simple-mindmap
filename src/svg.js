@@ -32,8 +32,129 @@ export const DEFAULT_STATUSES = Object.freeze({
   decided: { label: "Decided", shape: "decided", color: "green" },
   parked: { label: "Parked", shape: "parked", color: "grey" },
   blocked: { label: "Blocked", shape: "blocked", color: "red" },
-  superseded: { label: "Superseded", shape: "superseded", color: "grey" },
+  superseded: { label: "Superseded", shape: "superseded", color: "grey", strike: true },
 });
+
+// ---- status icons (1.1) ----
+// Draw precedence: render > image > icon (path is sugar for icon) > shape > symbol > dot. The export skips render and
+// any image that is not a data: URL, and uses the highest static level present.
+export const ICON_FIELDS = Object.freeze(["render", "image", "icon", "path", "shape", "symbol"]);
+export const SHAPES = Object.freeze(["open", "pending", "decided", "parked", "blocked", "superseded"]);
+export const ICON_LIMITS = Object.freeze({ nodes: 64, d: 8192 });
+
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// A host entry that sets any icon field replaces every inherited icon field; label, color and strike still inherit.
+export function mergeStatus(base, own) {
+  const b = isObj(base) ? base : {};
+  const o = isObj(own) ? own : {};
+  const replace = ICON_FIELDS.some((k) => o[k] !== undefined && o[k] !== null);
+  const out = {};
+  for (const [k, v] of Object.entries(b)) if (!(replace && ICON_FIELDS.includes(k))) out[k] = v;
+  for (const [k, v] of Object.entries(o)) if (v !== undefined) out[k] = v;
+  return out;
+}
+
+// statuses as given to createMindmap -> the effective map (every key merged with the default of the same key).
+export function mergeStatuses(statuses) {
+  if (!isObj(statuses) || !Object.keys(statuses).length) return { ...DEFAULT_STATUSES };
+  const out = {};
+  for (const [k, v] of Object.entries(statuses)) out[k] = mergeStatus(DEFAULT_STATUSES[k], v);
+  return out;
+}
+
+export const isStrike = (s) => !!s && (s.strike === true || s.shape === "superseded");
+
+const ICON_TAGS = new Set(["path", "circle", "ellipse", "line", "rect", "polyline", "polygon", "g"]);
+const NUM_ATTRS = new Set(["cx", "cy", "r", "x", "y", "width", "height", "rx", "ry", "x1", "y1", "x2", "y2"]);
+const NUM_RE = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+const D_RE = /^[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\-\s]*$/;
+const POINTS_RE = /^[0-9eE.,+\-\s]*$/;
+const VIEWBOX_RE = /^\s*[-+]?[\d.]+(?:[\s,]+[-+]?[\d.]+){3}\s*$/;
+
+// icon {viewBox?, nodes: [[tag, attrs, children?]], stroke?} -> {viewBox, stroke, nodes} | null (null: use the fallback).
+// Unknown tags and attributes are dropped; over a cap (nodes, d length) or nothing left -> null.
+export function sanitizeIcon(icon) {
+  if (!isObj(icon) || !Array.isArray(icon.nodes)) return null;
+  const viewBox = icon.viewBox === undefined ? "0 0 24 24" : icon.viewBox;
+  if (typeof viewBox !== "string" || !VIEWBOX_RE.test(viewBox)) return null;
+  let count = 0, over = false;
+  const walk = (list) => {
+    const out = [];
+    for (const n of list) {
+      if (++count > ICON_LIMITS.nodes) { over = true; return out; }
+      if (!Array.isArray(n) || typeof n[0] !== "string" || !ICON_TAGS.has(n[0])) continue;
+      const a = {}, fills = [];
+      for (const [k, v] of Object.entries(isObj(n[1]) ? n[1] : {})) {
+        const t = typeof v === "number" && Number.isFinite(v) ? String(v) : typeof v === "string" ? v.trim() : null;
+        if (t === null) continue;
+        if (NUM_ATTRS.has(k)) { if (NUM_RE.test(t)) a[k] = t; }
+        else if (k === "d" || k === "points") {
+          if (t.length > ICON_LIMITS.d) { over = true; return out; }
+          if ((k === "d" ? D_RE : POINTS_RE).test(t)) a[k] = t;
+        } else if (k === "fill") { if (t === "none") a.fill = "none"; else if (t === "currentColor") fills.push("fill"); }
+      }
+      const kids = n[0] === "g" && Array.isArray(n[2]) ? walk(n[2]) : [];
+      if (over) return out;
+      out.push({ t: n[0], a, fills, k: kids });
+    }
+    return out;
+  };
+  const nodes = walk(icon.nodes);
+  if (over || !nodes.length) return null;
+  return { viewBox: viewBox.trim(), stroke: icon.stroke === true, nodes };
+}
+
+const sanitized = new WeakMap(); // status entry -> {icon, path, value}
+function iconOf(s) {
+  const hit = sanitized.get(s);
+  if (hit && hit.icon === s.icon && hit.path === s.path) return hit.value;
+  let value = null;
+  if (s.icon !== undefined && s.icon !== null) value = sanitizeIcon(s.icon);
+  if (!value && typeof s.path === "string") value = sanitizeIcon({ viewBox: "0 0 12 12", nodes: [["path", { d: s.path }]] });
+  sanitized.set(s, { icon: s.icon, path: s.path, value });
+  return value;
+}
+
+const DATA_IMAGE = /^data:image\/(?:png|jpeg|gif|webp|svg\+xml)[;,]/i;
+// image URL filter: data:image/(png|jpeg|gif|webp|svg+xml), https:, http:, blob:, or relative. Anything else -> null.
+export function imageUrl(u) {
+  if (typeof u !== "string") return null;
+  const s = u.trim();
+  if (!s || /[\u0000-\u001F\u007F]/.test(s)) return null;
+  if (DATA_IMAGE.test(s)) return s;
+  if (/[\s]/.test(s)) return null;
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(s);
+  if (!m) return s;
+  return ["https", "http", "blob"].includes(m[1].toLowerCase()) ? s : null;
+}
+
+// A sanitized icon drawn 12 x 12 centred at cx, cy as a nested <svg> (same in the map, the outline and the export).
+export function iconSpec(ic, c, cx, cy) {
+  const a = { x: cx - 6, y: cy - 6, width: 12, height: 12, viewBox: ic.viewBox, overflow: "visible" };
+  const p = {};
+  if (ic.stroke) { Object.assign(a, { fill: "none", "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round" }); p.stroke = c; }
+  else p.fill = c;
+  const conv = (n) => el(n.t, n.a, { p: Object.fromEntries(n.fills.map((k) => [k, c])), k: n.k.map(conv) });
+  return el("svg", a, { p, k: ic.nodes.map(conv) });
+}
+
+// Which level draws status `key`: {level: "render" | "image" | "icon" | "shape" | "symbol" | "dot", url?, icon?}.
+// o.export: the static export rules; o.rendered(key): true when the component holds a rendered element for the key.
+export function statusLevel(key, statuses, o = {}) {
+  const s = statuses && statuses[key];
+  if (!s) return null;
+  if (!o.export && typeof s.render === "function" && o.rendered && o.rendered(key)) return { level: "render" };
+  if (s.image !== undefined && s.image !== null) {
+    const url = imageUrl(s.image);
+    if (url && (!o.export || DATA_IMAGE.test(url))) return { level: "image", url };
+  }
+  const icon = (s.icon !== undefined && s.icon !== null) || s.path !== undefined ? iconOf(s) : null;
+  if (icon) return { level: "icon", icon };
+  if (SHAPES.includes(s.shape)) return { level: "shape" };
+  if (typeof s.symbol === "string" && s.symbol !== "") return { level: "symbol" };
+  return { level: "dot" };
+}
 
 export const DEFAULT_STRINGS = Object.freeze({
   hidden: "{n} hidden children",
@@ -46,14 +167,18 @@ const r2 = (v) => Math.round(v * 100) / 100;
 const paint = (tok) => (TOKENS.includes(tok) ? { tok } : { raw: String(tok) });
 const el = (t, a = {}, extra = {}) => ({ t, a, ...extra });
 
-// A status symbol (or tone dot) centred at cx, cy.
-export function statusShape(key, statuses, cx, cy) {
+// A status symbol (or tone dot) centred at cx, cy. o: {export, rendered} as for statusLevel.
+export function statusShape(key, statuses, cx, cy, o = {}) {
   const s = statuses[key];
   if (!s) return null;
   const c = paint(s.color || "grey");
   const ring = el("circle", { cx, cy, r: 5, fill: "none", "stroke-width": 1.5 }, { p: { stroke: c } });
   const kids = [];
-  switch (s.shape) {
+  const lv = statusLevel(key, statuses, o);
+  if (lv.level === "render") kids.push(el("svg", { x: cx - 6, y: cy - 6, width: 12, height: 12, viewBox: "0 0 12 12", overflow: "visible" }, { c: "mm-status-render", rk: key }));
+  else if (lv.level === "image") kids.push(el("image", { href: lv.url, x: cx - 6, y: cy - 6, width: 12, height: 12, preserveAspectRatio: "xMidYMid meet" }));
+  else if (lv.level === "icon") kids.push(iconSpec(lv.icon, c, cx, cy));
+  else switch (lv.level === "shape" ? s.shape : null) {
     case "open": kids.push(ring); break;
     case "pending": kids.push(ring, el("path", { d: `M${cx} ${cy - 5}A5 5 0 0 0 ${cx} ${cy + 5}Z` }, { p: { fill: c } })); break;
     case "decided": kids.push(el("path", { d: `M${cx - 4} ${cy}L${cx - 1} ${cy + 3}L${cx + 4.5} ${cy - 3.5}`, fill: "none", "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round" }, { p: { stroke: c } })); break;
@@ -61,7 +186,7 @@ export function statusShape(key, statuses, cx, cy) {
     case "blocked": kids.push(ring, el("path", { d: `M${cx - 3.5} ${cy + 3.5}L${cx + 3.5} ${cy - 3.5}`, "stroke-width": 1.5 }, { p: { stroke: c } })); break;
     case "superseded": kids.push(el("path", { d: `M${cx - 4} ${cy}H${cx + 4}`, "stroke-width": 2, "stroke-linecap": "round" }, { p: { stroke: c } })); break;
     default:
-      kids.push(el("text", { x: cx, y: cy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": FONT_SIZE.small }, { p: { fill: c }, x: s.symbol || "\u25CF" }));
+      kids.push(el("text", { x: cx, y: cy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": FONT_SIZE.small }, { p: { fill: c }, x: lv.level === "symbol" ? s.symbol : "\u25CF" }));
   }
   if (s.label) kids.push(el("title", {}, { x: s.label }));
   return el("g", {}, { c: "mm-status", k: kids });
@@ -83,7 +208,8 @@ function edgePath(p, c, view) {
 
 // scene(data, lay, opts) -> {bounds, defs, edges, links, nodes}: arrays of element specs
 // opts: statuses, strings, selected, hits (Set), current, dim (Set of ids to fade), links ("default" | "all"),
-//       interactive (adds collapse toggles), uid (prefix for marker ids)
+//       interactive (adds collapse toggles), uid (prefix for marker ids), export (static icon rules),
+//       rendered(key) (the component holds a render() element for the status)
 export function scene(data, lay, opts = {}) {
   const statuses = opts.statuses || DEFAULT_STATUSES;
   const strings = { ...DEFAULT_STRINGS, ...(opts.strings || {}) };
@@ -137,7 +263,7 @@ export function scene(data, lay, opts = {}) {
     if (opts.hits && opts.hits.has(b.id)) cls.push("is-hit");
     if (opts.current === b.id) cls.push("is-current");
     if (opts.dim && opts.dim.has(b.id)) cls.push("is-dim");
-    const sup = n.status && statuses[n.status] && statuses[n.status].shape === "superseded";
+    const sup = n.status && isStrike(statuses[n.status]);
     if (sup) cls.push("is-superseded");
     const fill = opts.current === b.id ? "hit-current" : opts.hits && opts.hits.has(b.id) ? "hit" : b.root ? "root-bg" : "node-bg";
     const rect = { width: b.w, height: b.h, rx: b.root ? 8 : 6, "stroke-width": b.root ? 0 : 1.25 };
@@ -146,7 +272,7 @@ export function scene(data, lay, opts = {}) {
     const cy = b.h / 2;
     if (!b.root) {
       const sx = GEOM.padX + GEOM.sym / 2;
-      if (n.status) { const s = statusShape(n.status, statuses, sx, cy); if (s) kids.push(s); }
+      if (n.status) { const s = statusShape(n.status, statuses, sx, cy, { export: opts.export, rendered: opts.rendered }); if (s) kids.push(s); }
       else if (n.tone) kids.push(toneDot(n.tone, sx, cy));
     }
     if (b.num) kids.push(el("text", { x: b.numX, y: cy, "dominant-baseline": "central", "font-size": FONT_SIZE.num, "font-family": MONO }, { c: "mm-num", p: { fill: paint("muted") }, x: b.num }));
@@ -190,8 +316,10 @@ export function escapeXml(s) {
 }
 const ATTR_NAME = /^[a-zA-Z_:][-a-zA-Z0-9_:.]*$/;
 
+// A raw colour containing var() cannot be resolved without a page: the export uses the grey token instead.
 export function resolvePaint(v, theme) {
   if (v.tok) return theme[v.tok] ?? THEME[v.tok];
+  if (/var\(/i.test(v.raw)) return theme.grey ?? THEME.grey;
   return v.raw;
 }
 
@@ -216,7 +344,7 @@ export function toSVG(json, opts = {}) {
   const lay = layout(data, { view: opts.view || data.layout || "both", collapsed: opts.collapsed, focus: opts.focus, measure: opts.measure, badge: opts.badge });
   let dim = null;
   if (Array.isArray(opts.filter)) { dim = new Set(); for (const [id, e] of indexTree(data)) if (!e.node.status || !opts.filter.includes(e.node.status)) dim.add(id); }
-  const sc = scene(data, lay, { statuses, strings: opts.strings, selected: opts.selected, links: opts.links, uid: "mm", dim });
+  const sc = scene(data, lay, { statuses, strings: opts.strings, selected: opts.selected, links: opts.links, uid: "mm", dim, export: true });
   const theme = { ...THEME, ...(opts.theme || {}) };
   const pad = opts.padding ?? 20;
   const { x0, y0, w, h } = lay.bounds;
@@ -235,6 +363,16 @@ export function toSVG(json, opts = {}) {
 }
 
 function stripClasses(s) { const { c, ...rest } = s; return { ...rest, k: (s.k || []).map(stripClasses) }; }
+
+// statusIcon(key, statuses, theme) -> a standalone 12 x 12 <svg> string drawn with the export rules (render skipped,
+// image only as data:), for a host legend or filter chip. statuses as given to createMindmap; null for an unknown key.
+export function statusIcon(key, statuses, theme) {
+  const st = mergeStatuses(statuses);
+  const g = statusShape(key, st, 6, 6, { export: true });
+  if (!g) return null;
+  const root = el("svg", { xmlns: "http://www.w3.org/2000/svg", width: 12, height: 12, viewBox: "0 0 12 12", overflow: "visible" }, { k: [g] });
+  return serialize(stripClasses(root), { ...THEME, ...(isObj(theme) ? theme : {}) });
+}
 
 // A deterministic fake text measurer (for node / tests): grapheme count x a constant per kind.
 export function fakeMeasure(text, kind) {

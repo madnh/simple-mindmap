@@ -3,21 +3,25 @@
 import { validate, indexTree, clone, VIEWS, countNodes } from "./model.js";
 import { applyOps } from "./ops.js";
 import { layout } from "./layout.js";
-import { scene, toSVG, DEFAULT_STATUSES, DEFAULT_STRINGS, THEME, TOKENS, FONT, MONO, FONT_SIZE, fmt } from "./svg.js";
+import { scene, toSVG, DEFAULT_STRINGS, THEME, TOKENS, FONT, MONO, FONT_SIZE, fmt, mergeStatus, mergeStatuses, sanitizeIcon, iconSpec } from "./svg.js";
 import { toOutline, toMermaid } from "./export.js";
 import { buildOutline, specToDom } from "./outline.js";
 
 export { validate, applyOps, toSVG, toOutline, toMermaid, layout };
 export { fromOutline } from "./export.js";
 export { pathOf, ERROR_CODES, DEFAULT_LIMITS } from "./model.js";
-export { DEFAULT_STATUSES, THEME, DARK_THEME } from "./svg.js";
+export { DEFAULT_STATUSES, THEME, DARK_THEME, statusIcon } from "./svg.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const STYLE_ID = "simple-mindmap-css";
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+// theme tokens accepted by theme {tokens} / setTheme: the 28 colour tokens plus font and mono (--mm-<name>)
+const THEME_TOKENS = [...TOKENS, "font", "mono"];
+const STYLE_FIELDS = ["label", "color", "strike", "icon", "path", "image", "render", "symbol", "shape"];
 const LARGE = 80;
 
 // Generated from src/mindmap.css by `npm run sync-css`; a unit test fails when the two differ.
-/*CSS-BEGIN*/export const CSS = "/* Defaults live under private names (--mmd-*, not part of the API) with zero specificity.\n   Every use reads var(--mm-x, var(--mmd-x)), so a --mm-* set by the host on .simple-mindmap\n   or on any ancestor wins in every theme. */\n:where(.simple-mindmap) {\n  --mmd-bg: #ffffff; --mmd-text: #1f2328; --mmd-muted: #6e7781; --mmd-node-bg: #ffffff; --mmd-node-border: #d0d7de;\n  --mmd-root-bg: #24292f; --mmd-root-text: #ffffff; --mmd-select: #0969da; --mmd-hit: #fff1a8; --mmd-hit-current: #ffd33d;\n  --mmd-chip-bg: #eaeef2;\n  --mmd-green: #1a7f37; --mmd-amber: #bf8700; --mmd-red: #cf222e; --mmd-blue: #0969da; --mmd-purple: #8250df; --mmd-grey: #6e7781;\n  --mmd-link-blocks: #cf222e; --mmd-link-supersedes: #6e7781; --mmd-link-relates: #8c959f;\n  --mmd-edge-0: #4c8bf5; --mmd-edge-1: #e8710a; --mmd-edge-2: #1e8e3e; --mmd-edge-3: #a142f4;\n  --mmd-edge-4: #d93025; --mmd-edge-5: #12a4af; --mmd-edge-6: #c26401; --mmd-edge-7: #5f6368;\n  --mmd-font: -apple-system, BlinkMacSystemFont, system-ui, \"Helvetica Neue\", sans-serif;\n  --mmd-mono: ui-monospace, \"SF Mono\", Menlo, monospace;\n}\n:where(.simple-mindmap[data-theme=\"dark\"]) {\n  --mmd-bg: #0d1117; --mmd-text: #e6edf3; --mmd-muted: #8b949e; --mmd-node-bg: #161b22; --mmd-node-border: #30363d;\n  --mmd-root-bg: #e6edf3; --mmd-root-text: #0d1117; --mmd-select: #58a6ff; --mmd-hit: #5a4a00; --mmd-hit-current: #9e7700;\n  --mmd-chip-bg: #30363d; --mmd-green: #3fb950; --mmd-amber: #d29922; --mmd-red: #f85149; --mmd-blue: #58a6ff;\n  --mmd-purple: #bc8cff; --mmd-grey: #8b949e; --mmd-link-blocks: #f85149; --mmd-link-supersedes: #8b949e; --mmd-link-relates: #6e7681;\n}\n@media (prefers-color-scheme: dark) {\n  :where(.simple-mindmap:not([data-theme=\"light\"])) {\n    --mmd-bg: #0d1117; --mmd-text: #e6edf3; --mmd-muted: #8b949e; --mmd-node-bg: #161b22; --mmd-node-border: #30363d;\n    --mmd-root-bg: #e6edf3; --mmd-root-text: #0d1117; --mmd-select: #58a6ff; --mmd-hit: #5a4a00; --mmd-hit-current: #9e7700;\n    --mmd-chip-bg: #30363d; --mmd-green: #3fb950; --mmd-amber: #d29922; --mmd-red: #f85149; --mmd-blue: #58a6ff;\n    --mmd-purple: #bc8cff; --mmd-grey: #8b949e; --mmd-link-blocks: #f85149; --mmd-link-supersedes: #8b949e; --mmd-link-relates: #6e7681;\n  }\n}\n.simple-mindmap {\n  position: relative; overflow: hidden; box-sizing: border-box; width: 100%; height: 100%; min-height: 240px;\n  background: var(--mm-bg, var(--mmd-bg)); color: var(--mm-text, var(--mmd-text)); font-family: var(--mm-font, var(--mmd-font)); font-size: 13px; line-height: 1.35;\n  outline: none; -webkit-user-select: none; user-select: none;\n}\n.simple-mindmap *, .simple-mindmap *::before, .simple-mindmap *::after { box-sizing: border-box; }\n.simple-mindmap:focus-visible { box-shadow: inset 0 0 0 2px var(--mm-select, var(--mmd-select)); }\n.simple-mindmap .mm-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }\n.simple-mindmap .mm-canvas.is-panning { cursor: grabbing; }\n.simple-mindmap .mm-viewport { transform-origin: 0 0; }\n.simple-mindmap .mm-node { cursor: default; }\n.simple-mindmap[data-mode=\"select\"] .mm-node, .simple-mindmap[data-mode=\"edit\"] .mm-node { cursor: pointer; }\n.simple-mindmap .mm-node.is-dragging { opacity: 0.6; pointer-events: none; }\n.simple-mindmap .mm-node.is-drop .mm-box { stroke: var(--mm-select, var(--mmd-select)) !important; stroke-width: 2.5; }\n.simple-mindmap .mm-toggle, .simple-mindmap .mm-chip { cursor: pointer; }\n.simple-mindmap .mm-btn {\n  border: 1px solid var(--mm-node-border, var(--mmd-node-border)); background: var(--mm-node-bg, var(--mmd-node-bg)); color: var(--mm-text, var(--mmd-text)); border-radius: 6px;\n  font: inherit; font-size: 12px; line-height: 1.2; padding: 4px 8px; cursor: pointer; min-width: 26px;\n}\n.simple-mindmap .mm-btn:hover { background: var(--mm-chip-bg, var(--mmd-chip-bg)); }\n.simple-mindmap .mm-btn:disabled { opacity: 0.45; cursor: default; }\n.simple-mindmap .mm-btn[aria-pressed=\"true\"] { background: var(--mm-select, var(--mmd-select)); border-color: var(--mm-select, var(--mmd-select)); color: var(--mm-bg, var(--mmd-bg)); }\n.simple-mindmap .mm-btn:focus-visible, .simple-mindmap .mm-menu button:focus-visible { outline: 2px solid var(--mm-select, var(--mmd-select)); outline-offset: 1px; }\n.simple-mindmap .mm-group { display: inline-flex; gap: 0; }\n.simple-mindmap .mm-group .mm-btn { border-radius: 0; margin-left: -1px; }\n.simple-mindmap .mm-group .mm-btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }\n.simple-mindmap .mm-group .mm-btn:last-child { border-radius: 0 6px 6px 0; }\n.simple-mindmap .mm-search {\n  position: absolute; top: 8px; left: 8px; z-index: 2; display: flex; align-items: center; gap: 4px;\n  background: var(--mm-node-bg, var(--mmd-node-bg)); border: 1px solid var(--mm-node-border, var(--mmd-node-border)); border-radius: 6px; padding: 2px 4px;\n}\n.simple-mindmap .mm-search input {\n  border: 0; background: transparent; color: inherit; font: inherit; width: 13em; padding: 3px 4px; outline: none; min-width: 0;\n}\n.simple-mindmap .mm-search .mm-count { color: var(--mm-muted, var(--mmd-muted)); font-size: 12px; white-space: nowrap; }\n.simple-mindmap .mm-search .mm-btn { border: 0; padding: 2px 6px; }\n.simple-mindmap .mm-tools { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }\n.simple-mindmap .mm-zoom { position: absolute; bottom: 8px; right: 8px; z-index: 2; display: flex; gap: 4px; }\n.simple-mindmap .mm-crumbs {\n  position: absolute; bottom: 8px; left: 8px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px;\n  max-width: calc(100% - 220px); font-size: 12px; color: var(--mm-muted, var(--mmd-muted));\n}\n.simple-mindmap .mm-crumbs .mm-btn { padding: 2px 6px; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.simple-mindmap .mm-more { position: absolute; z-index: 2; padding: 0 6px; height: 22px; line-height: 1; }\n.simple-mindmap .mm-menu {\n  position: absolute; z-index: 3; display: flex; flex-direction: column; min-width: 11em; padding: 4px;\n  background: var(--mm-node-bg, var(--mmd-node-bg)); border: 1px solid var(--mm-node-border, var(--mmd-node-border)); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);\n}\n.simple-mindmap .mm-menu button {\n  border: 0; background: transparent; color: var(--mm-text, var(--mmd-text)); font: inherit; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;\n}\n.simple-mindmap .mm-menu .mm-icon { display: inline-block; min-width: 1.4em; margin-right: 4px; text-align: center; }\n.simple-mindmap .mm-menu button:hover { background: var(--mm-chip-bg, var(--mmd-chip-bg)); }\n.simple-mindmap .mm-rename {\n  position: absolute; z-index: 3; font: inherit; color: var(--mm-text, var(--mmd-text)); background: var(--mm-node-bg, var(--mmd-node-bg));\n  border: 2px solid var(--mm-select, var(--mmd-select)); border-radius: 6px; padding: 3px 6px; min-width: 8em; -webkit-user-select: text; user-select: text;\n}\n.simple-mindmap .mm-error { padding: 16px; }\n.simple-mindmap .mm-error-title { font-weight: 600; }\n.simple-mindmap .mm-error-detail { color: var(--mm-muted, var(--mmd-muted)); margin-top: 4px; overflow-wrap: anywhere; }\n.simple-mindmap .mm-outline { position: absolute; inset: 0; overflow: auto; padding: 8px 12px 24px; }\n.simple-mindmap .mm-outline .mm-search { position: static; display: inline-flex; margin: 0 0 6px; }\n.simple-mindmap .mm-outline-head { display: flex; align-items: center; gap: 8px; padding-right: 150px; min-height: 34px; }\n.simple-mindmap .mm-tree, .simple-mindmap .mm-tree ul { list-style: none; margin: 0; padding: 0; }\n.simple-mindmap .mm-tree ul { padding-left: 22px; }\n.simple-mindmap .mm-row { display: flex; align-items: flex-start; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: default; }\n.simple-mindmap[data-mode=\"select\"] .mm-row, .simple-mindmap[data-mode=\"edit\"] .mm-row { cursor: pointer; }\n.simple-mindmap .mm-row.is-selected { box-shadow: inset 0 0 0 2px var(--mm-select, var(--mmd-select)); }\n.simple-mindmap .mm-row.is-hit { background: var(--mm-hit, var(--mmd-hit)); }\n.simple-mindmap .mm-row.is-current { background: var(--mm-hit-current, var(--mmd-hit-current)); }\n.simple-mindmap .mm-row.is-root .mm-title { font-weight: 600; font-size: 15px; }\n.simple-mindmap .mm-row .mm-num { font-family: var(--mm-mono, var(--mmd-mono)); font-size: 11px; color: var(--mm-muted, var(--mmd-muted)); padding-top: 2px; white-space: nowrap; }\n.simple-mindmap .mm-row .mm-title { white-space: normal; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }\n.simple-mindmap .mm-row .mm-badge { color: var(--mm-muted, var(--mmd-muted)); font-size: 11px; padding-top: 2px; }\n.simple-mindmap .mm-row.is-dim { opacity: 0.35; }\n.simple-mindmap .mm-row.is-superseded .mm-title { text-decoration: line-through; opacity: 0.55; }\n.simple-mindmap .mm-arrow {\n  flex: none; width: 16px; height: 18px; border: 0; padding: 0; background: none; color: var(--mm-muted, var(--mmd-muted)); cursor: pointer; font-size: 11px;\n}\n.simple-mindmap .mm-arrow[aria-expanded=\"true\"] { transform: rotate(90deg); }\n.simple-mindmap .mm-arrow-pad { flex: none; width: 16px; }\n.simple-mindmap .mm-sym { flex: none; width: 12px; height: 12px; margin-top: 3px; overflow: visible; }\n@media (prefers-reduced-motion: no-preference) {\n  .simple-mindmap .mm-viewport.is-animating { transition: transform 180ms ease-out; }\n}\n";/*CSS-END*/
+/*CSS-BEGIN*/export const CSS = "/* Defaults live under private names (--mmd-*, not part of the API) with zero specificity.\n   Every use reads var(--mm-x, var(--mmd-x)), so a --mm-* set by the host on .simple-mindmap\n   or on any ancestor wins in every theme. */\n:where(.simple-mindmap) {\n  --mmd-bg: #ffffff; --mmd-text: #1f2328; --mmd-muted: #6e7781; --mmd-node-bg: #ffffff; --mmd-node-border: #d0d7de;\n  --mmd-root-bg: #24292f; --mmd-root-text: #ffffff; --mmd-select: #0969da; --mmd-hit: #fff1a8; --mmd-hit-current: #ffd33d;\n  --mmd-chip-bg: #eaeef2;\n  --mmd-green: #1a7f37; --mmd-amber: #bf8700; --mmd-red: #cf222e; --mmd-blue: #0969da; --mmd-purple: #8250df; --mmd-grey: #6e7781;\n  --mmd-link-blocks: #cf222e; --mmd-link-supersedes: #6e7781; --mmd-link-relates: #8c959f;\n  --mmd-edge-0: #4c8bf5; --mmd-edge-1: #e8710a; --mmd-edge-2: #1e8e3e; --mmd-edge-3: #a142f4;\n  --mmd-edge-4: #d93025; --mmd-edge-5: #12a4af; --mmd-edge-6: #c26401; --mmd-edge-7: #5f6368;\n  --mmd-font: -apple-system, BlinkMacSystemFont, system-ui, \"Helvetica Neue\", sans-serif;\n  --mmd-mono: ui-monospace, \"SF Mono\", Menlo, monospace;\n}\n:where(.simple-mindmap[data-theme=\"dark\"]) {\n  --mmd-bg: #0d1117; --mmd-text: #e6edf3; --mmd-muted: #8b949e; --mmd-node-bg: #161b22; --mmd-node-border: #30363d;\n  --mmd-root-bg: #e6edf3; --mmd-root-text: #0d1117; --mmd-select: #58a6ff; --mmd-hit: #5a4a00; --mmd-hit-current: #9e7700;\n  --mmd-chip-bg: #30363d; --mmd-green: #3fb950; --mmd-amber: #d29922; --mmd-red: #f85149; --mmd-blue: #58a6ff;\n  --mmd-purple: #bc8cff; --mmd-grey: #8b949e; --mmd-link-blocks: #f85149; --mmd-link-supersedes: #8b949e; --mmd-link-relates: #6e7681;\n}\n@media (prefers-color-scheme: dark) {\n  :where(.simple-mindmap:not([data-theme=\"light\"])) {\n    --mmd-bg: #0d1117; --mmd-text: #e6edf3; --mmd-muted: #8b949e; --mmd-node-bg: #161b22; --mmd-node-border: #30363d;\n    --mmd-root-bg: #e6edf3; --mmd-root-text: #0d1117; --mmd-select: #58a6ff; --mmd-hit: #5a4a00; --mmd-hit-current: #9e7700;\n    --mmd-chip-bg: #30363d; --mmd-green: #3fb950; --mmd-amber: #d29922; --mmd-red: #f85149; --mmd-blue: #58a6ff;\n    --mmd-purple: #bc8cff; --mmd-grey: #8b949e; --mmd-link-blocks: #f85149; --mmd-link-supersedes: #8b949e; --mmd-link-relates: #6e7681;\n  }\n}\n.simple-mindmap {\n  position: relative; overflow: hidden; box-sizing: border-box; width: 100%; height: 100%; min-height: 240px;\n  background: var(--mm-bg, var(--mmd-bg)); color: var(--mm-text, var(--mmd-text)); font-family: var(--mm-font, var(--mmd-font)); font-size: 13px; line-height: 1.35;\n  outline: none; -webkit-user-select: none; user-select: none;\n}\n.simple-mindmap *, .simple-mindmap *::before, .simple-mindmap *::after { box-sizing: border-box; }\n.simple-mindmap:focus-visible { box-shadow: inset 0 0 0 2px var(--mm-select, var(--mmd-select)); }\n.simple-mindmap .mm-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }\n.simple-mindmap .mm-canvas.is-panning { cursor: grabbing; }\n.simple-mindmap .mm-viewport { transform-origin: 0 0; }\n.simple-mindmap .mm-node { cursor: default; }\n.simple-mindmap[data-mode=\"select\"] .mm-node, .simple-mindmap[data-mode=\"edit\"] .mm-node { cursor: pointer; }\n.simple-mindmap .mm-node.is-dragging { opacity: 0.6; pointer-events: none; }\n.simple-mindmap .mm-node.is-drop .mm-box { stroke: var(--mm-select, var(--mmd-select)) !important; stroke-width: 2.5; }\n.simple-mindmap .mm-toggle, .simple-mindmap .mm-chip { cursor: pointer; }\n.simple-mindmap .mm-btn {\n  border: 1px solid var(--mm-node-border, var(--mmd-node-border)); background: var(--mm-node-bg, var(--mmd-node-bg)); color: var(--mm-text, var(--mmd-text)); border-radius: 6px;\n  font: inherit; font-size: 12px; line-height: 1.2; padding: 4px 8px; cursor: pointer; min-width: 26px;\n}\n.simple-mindmap .mm-btn:hover { background: var(--mm-chip-bg, var(--mmd-chip-bg)); }\n.simple-mindmap .mm-btn:disabled { opacity: 0.45; cursor: default; }\n.simple-mindmap .mm-btn[aria-pressed=\"true\"] { background: var(--mm-select, var(--mmd-select)); border-color: var(--mm-select, var(--mmd-select)); color: var(--mm-bg, var(--mmd-bg)); }\n.simple-mindmap .mm-btn:focus-visible, .simple-mindmap .mm-menu button:focus-visible { outline: 2px solid var(--mm-select, var(--mmd-select)); outline-offset: 1px; }\n.simple-mindmap .mm-group { display: inline-flex; gap: 0; }\n.simple-mindmap .mm-group .mm-btn { border-radius: 0; margin-left: -1px; }\n.simple-mindmap .mm-group .mm-btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }\n.simple-mindmap .mm-group .mm-btn:last-child { border-radius: 0 6px 6px 0; }\n.simple-mindmap .mm-search {\n  position: absolute; top: 8px; left: 8px; z-index: 2; display: flex; align-items: center; gap: 4px;\n  background: var(--mm-node-bg, var(--mmd-node-bg)); border: 1px solid var(--mm-node-border, var(--mmd-node-border)); border-radius: 6px; padding: 2px 4px;\n}\n.simple-mindmap .mm-search input {\n  border: 0; background: transparent; color: inherit; font: inherit; width: 13em; padding: 3px 4px; outline: none; min-width: 0;\n}\n.simple-mindmap .mm-search .mm-count { color: var(--mm-muted, var(--mmd-muted)); font-size: 12px; white-space: nowrap; }\n.simple-mindmap .mm-search .mm-btn { border: 0; padding: 2px 6px; }\n.simple-mindmap .mm-tools { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }\n.simple-mindmap .mm-zoom { position: absolute; bottom: 8px; right: 8px; z-index: 2; display: flex; gap: 4px; }\n.simple-mindmap .mm-crumbs {\n  position: absolute; bottom: 8px; left: 8px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px;\n  max-width: calc(100% - 220px); font-size: 12px; color: var(--mm-muted, var(--mmd-muted));\n}\n.simple-mindmap .mm-crumbs .mm-btn { padding: 2px 6px; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.simple-mindmap .mm-more { position: absolute; z-index: 2; padding: 0 6px; height: 22px; line-height: 1; }\n.simple-mindmap .mm-menu {\n  position: absolute; z-index: 3; display: flex; flex-direction: column; min-width: 11em; padding: 4px;\n  background: var(--mm-node-bg, var(--mmd-node-bg)); border: 1px solid var(--mm-node-border, var(--mmd-node-border)); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);\n}\n.simple-mindmap .mm-menu button {\n  border: 0; background: transparent; color: var(--mm-text, var(--mmd-text)); font: inherit; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer;\n}\n.simple-mindmap .mm-menu .mm-icon { display: inline-block; min-width: 1.4em; margin-right: 4px; text-align: center; }\n.simple-mindmap .mm-menu button:hover { background: var(--mm-chip-bg, var(--mmd-chip-bg)); }\n.simple-mindmap .mm-rename {\n  position: absolute; z-index: 3; font: inherit; color: var(--mm-text, var(--mmd-text)); background: var(--mm-node-bg, var(--mmd-node-bg));\n  border: 2px solid var(--mm-select, var(--mmd-select)); border-radius: 6px; padding: 3px 6px; min-width: 8em; -webkit-user-select: text; user-select: text;\n}\n.simple-mindmap .mm-error { padding: 16px; }\n.simple-mindmap .mm-error-title { font-weight: 600; }\n.simple-mindmap .mm-error-detail { color: var(--mm-muted, var(--mmd-muted)); margin-top: 4px; overflow-wrap: anywhere; }\n.simple-mindmap .mm-outline { position: absolute; inset: 0; overflow: auto; padding: 8px 12px 24px; }\n.simple-mindmap .mm-outline .mm-search { position: static; display: inline-flex; margin: 0 0 6px; }\n.simple-mindmap .mm-outline-head { display: flex; align-items: center; gap: 8px; padding-right: 150px; min-height: 34px; }\n.simple-mindmap .mm-tree, .simple-mindmap .mm-tree ul { list-style: none; margin: 0; padding: 0; }\n.simple-mindmap .mm-tree ul { padding-left: 22px; }\n.simple-mindmap .mm-row { display: flex; align-items: flex-start; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: default; }\n.simple-mindmap[data-mode=\"select\"] .mm-row, .simple-mindmap[data-mode=\"edit\"] .mm-row { cursor: pointer; }\n.simple-mindmap .mm-row.is-selected { box-shadow: inset 0 0 0 2px var(--mm-select, var(--mmd-select)); }\n.simple-mindmap .mm-row.is-hit { background: var(--mm-hit, var(--mmd-hit)); }\n.simple-mindmap .mm-row.is-current { background: var(--mm-hit-current, var(--mmd-hit-current)); }\n.simple-mindmap .mm-row.is-root .mm-title { font-weight: 600; font-size: 15px; }\n.simple-mindmap .mm-row .mm-num { font-family: var(--mm-mono, var(--mmd-mono)); font-size: 11px; color: var(--mm-muted, var(--mmd-muted)); padding-top: 2px; white-space: nowrap; }\n.simple-mindmap .mm-row .mm-title { white-space: normal; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }\n.simple-mindmap .mm-row .mm-badge { color: var(--mm-muted, var(--mmd-muted)); font-size: 11px; padding-top: 2px; }\n.simple-mindmap .mm-row.is-dim { opacity: 0.35; }\n.simple-mindmap .mm-row.is-superseded .mm-title { text-decoration: line-through; opacity: 0.55; }\n.simple-mindmap .mm-arrow {\n  flex: none; width: 16px; height: 18px; border: 0; padding: 0; background: none; color: var(--mm-muted, var(--mmd-muted)); cursor: pointer; font-size: 11px;\n}\n.simple-mindmap .mm-arrow[aria-expanded=\"true\"] { transform: rotate(90deg); }\n.simple-mindmap .mm-arrow-pad { flex: none; width: 16px; }\n.simple-mindmap .mm-sym { flex: none; width: 12px; height: 12px; margin-top: 3px; overflow: visible; }\n.simple-mindmap span.mm-sym { display: inline-flex; align-items: center; justify-content: center; }\n.simple-mindmap span.mm-sym > * { max-width: 12px; max-height: 12px; }\n.simple-mindmap .mm-menu .mm-icon svg { width: 12px; height: 12px; vertical-align: -1px; overflow: visible; }\n@media (prefers-reduced-motion: no-preference) {\n  .simple-mindmap .mm-viewport.is-animating { transition: transform 180ms ease-out; }\n}\n";/*CSS-END*/
 
 export const STRINGS = Object.freeze({
   ...DEFAULT_STRINGS,
@@ -63,10 +67,8 @@ export function createMindmap(el, opts = {}) {
   injectCSS(doc);
   const uid = `mm${++uidSeq}`;
   const strings = { ...STRINGS, ...(opts.strings || {}) };
-  const statuses = {};
-  if (opts.statuses && Object.keys(opts.statuses).length) {
-    for (const [k, v] of Object.entries(opts.statuses)) statuses[k] = { ...(DEFAULT_STATUSES[k] || {}), ...(v || {}) };
-  } else Object.assign(statuses, DEFAULT_STATUSES);
+  // Each key merges with the default of the same key; an entry that sets an icon field replaces the inherited icon.
+  const statuses = mergeStatuses(opts.statuses);
   const vopts = { statuses: Object.keys(statuses), limits: opts.limits };
   const mode = ["view", "select", "edit"].includes(opts.mode) ? opts.mode : "view";
   const actions = Array.isArray(opts.actions) ? opts.actions : [];
@@ -90,7 +92,28 @@ export function createMindmap(el, opts = {}) {
   wrap.className = "simple-mindmap";
   wrap.tabIndex = 0;
   wrap.dataset.mode = mode;
-  if (opts.theme === "dark" || opts.theme === "light") wrap.dataset.theme = opts.theme;
+  // theme: "light" | "dark" | null, or {mode?, tokens: {name: css value}} (tokens become --mm-<name> on the root)
+  let themeTokens = [], themeWarnings = [];
+  function applyTheme(t) {
+    let mode = null, tokens = null;
+    if (t === null || t === undefined || typeof t === "string") mode = t ?? null;
+    else if (isObj(t)) { mode = t.mode ?? null; tokens = t.tokens ?? null; }
+    else return false;
+    if (mode !== null && mode !== "light" && mode !== "dark") return false;
+    if (tokens !== null && !isObj(tokens)) return false;
+    for (const k of themeTokens) wrap.style.removeProperty(`--mm-${k}`);
+    themeTokens = []; themeWarnings = [];
+    if (mode) wrap.dataset.theme = mode; else delete wrap.dataset.theme;
+    for (const [k, v] of Object.entries(tokens || {})) {
+      if (!THEME_TOKENS.includes(k)) { themeWarnings.push({ path: `theme.tokens.${k}`, code: "unknown_key", message: `Unknown theme token "${k}" ignored` }); continue; }
+      if (typeof v !== "string" || !v.trim() || /[\u0000-\u001F\u007F;{}]/.test(v)) {
+        themeWarnings.push({ path: `theme.tokens.${k}`, code: "bad_value", message: `Theme token "${k}" must be a CSS value; ignored` }); continue;
+      }
+      wrap.style.setProperty(`--mm-${k}`, v.trim()); themeTokens.push(k);
+    }
+    return true;
+  }
+  applyTheme(opts.theme);
   el.appendChild(wrap);
 
   const svg = doc.createElementNS(SVG_NS, "svg");
@@ -371,8 +394,27 @@ export function createMindmap(el, opts = {}) {
     const d = doc.createElement("div"); d.className = "mm-error-detail"; d.textContent = detail || "";
     errorEl.replaceChildren(t, d);
   }
+  // status render(): called once per status key per draw, copied per node; a throw or a non-Element -> the fallback
+  // level and one `error` event for that key in that draw. Never called for the export.
+  let drawRendered = new Map();
+  function renderedEl(key) {
+    if (drawRendered.has(key)) return drawRendered.get(key);
+    const s = statuses[key]; let out = null;
+    if (s && typeof s.render === "function") {
+      try {
+        const { render: fn, ...pub } = s;
+        const got = fn(key, pub);
+        if (!got || got.nodeType !== 1) throw new TypeError("render must return an Element");
+        out = got;
+      } catch (e) { emit("error", { message: `status ${JSON.stringify(key)}: ${String(e && e.message || e)}`, status: key }); }
+    }
+    drawRendered.set(key, out);
+    return out;
+  }
+  const hooks = { rendered: (k) => !!renderedEl(k), render: (k) => { const e = renderedEl(k); return e ? e.cloneNode(true) : null; } };
   function render() {
     if (destroyed) return;
+    drawRendered = new Map();
     closeMenu(); closeRename();
     if (!data) { showError(str(strings, "invalid"), errors[0] ? str(strings, "errorLine", errors[0]) : ""); return; }
     try {
@@ -394,12 +436,12 @@ export function createMindmap(el, opts = {}) {
     lay = layout(data, { view, collapsed, focus: focusId, measure, badge });
     const sc = scene(data, lay, {
       statuses, strings, selected, hits: hitSet, current: hits[hitIndex], links: allLinks ? "all" : "default",
-      interactive: true, uid, dim: dimSet(),
+      interactive: true, uid, dim: dimSet(), rendered: hooks.rendered,
     });
     defsG.replaceChildren(...sc.defs.map((s) => specToDom(doc, s)));
     edgesG.replaceChildren(...sc.edges.map((s) => specToDom(doc, s)));
     linksG.replaceChildren(...sc.links.map((s) => specToDom(doc, s)));
-    nodesG.replaceChildren(...sc.nodes.map((s) => specToDom(doc, s)));
+    nodesG.replaceChildren(...sc.nodes.map((s) => specToDom(doc, s, hooks)));
     if (data.title) svg.setAttribute("aria-label", data.title); else svg.removeAttribute("aria-label");
     renderCrumbs();
     const showMore = mode !== "view" && selected && lay.boxes.has(selected) && (mode === "edit" || actionsFor(selected).length);
@@ -408,7 +450,7 @@ export function createMindmap(el, opts = {}) {
   }
   function renderOutline() {
     lay = null;
-    const built = buildOutline({ doc, idx, rootId: idx.keys().next().value, collapsed, selected, hits: new Set(hits), current: hits[hitIndex], statuses, strings, badge, dim: dimSet(), keep: filter && filterOnly ? keepSet() : null });
+    const built = buildOutline({ doc, idx, rootId: idx.keys().next().value, collapsed, selected, hits: new Set(hits), current: hits[hitIndex], statuses, strings, badge, dim: dimSet(), keep: filter && filterOnly ? keepSet() : null, hooks });
     outlineRows = built.rows; outlineOrder = built.order;
     outlineBody.replaceChildren(built.tree);
     outlineHead.replaceChildren(...[opts.search === false ? null : searchEl].filter(Boolean));
@@ -463,8 +505,14 @@ export function createMindmap(el, opts = {}) {
     menuEl = doc.createElement("div"); menuEl.className = "mm-menu"; menuEl.setAttribute("role", "menu");
     const item = (label, fn, icon) => {
       const b = doc.createElement("button"); b.type = "button"; b.setAttribute("role", "menuitem");
-      if (icon !== undefined && icon !== null && icon !== "") {
-        const i = doc.createElement("span"); i.className = "mm-icon"; i.setAttribute("aria-hidden", "true"); i.textContent = String(icon);
+      const ic = isObj(icon) ? sanitizeIcon(icon) : null;
+      if (ic || (!isObj(icon) && icon !== undefined && icon !== null && icon !== "")) {
+        const i = doc.createElement("span"); i.className = "mm-icon"; i.setAttribute("aria-hidden", "true");
+        if (ic) {
+          const sv = doc.createElementNS(SVG_NS, "svg"); sv.setAttribute("viewBox", "0 0 12 12");
+          sv.appendChild(specToDom(doc, iconSpec(ic, { tok: "text" }, 6, 6)));
+          i.appendChild(sv);
+        } else i.textContent = String(icon);
         const t = doc.createElement("span"); t.textContent = label;
         b.append(i, t);
       } else b.textContent = label;
@@ -780,12 +828,35 @@ export function createMindmap(el, opts = {}) {
         const cs = win && win.getComputedStyle ? win.getComputedStyle(wrap) : null;
         const theme = {};
         for (const t of TOKENS) { const v = cs && (cs.getPropertyValue(`--mm-${t}`).trim() || cs.getPropertyValue(`--mmd-${t}`).trim()); theme[t] = v || THEME[t]; }
-        return toSVG(data, { view, collapsed, focus: view === "outline" ? null : focusId, measure, theme, statuses, strings, badge, links: allLinks ? "all" : "default", filter, limits: opts.limits });
+        // A raw status colour (for example var(--brand)) is resolved by this page: computed colour of a probe element.
+        const out = {};
+        for (const [k, s] of Object.entries(statuses)) {
+          if (s.color === undefined || s.color === null || TOKENS.includes(s.color)) { out[k] = s; continue; }
+          const probe = doc.createElement("span"); probe.style.color = String(s.color); wrap.appendChild(probe);
+          const got = win && win.getComputedStyle ? win.getComputedStyle(probe).color : ""; probe.remove();
+          out[k] = { ...s, color: got || String(s.color) };
+        }
+        return toSVG(data, { view, collapsed, focus: view === "outline" ? null : focusId, measure, theme, statuses: out, strings, badge, links: allLinks ? "all" : "default", filter, limits: opts.limits });
       }
       return null;
     },
     get errors() { return clone(errors); },
-    get warnings() { return clone(warnings); },
+    get warnings() { return clone([...warnings, ...themeWarnings]); },
+    // setTheme("light" | "dark" | null | {mode?, tokens}) replaces the theme set so far; no redraw, no event.
+    setTheme(t) { return destroyed ? false : applyTheme(t); },
+    // setStatusStyle(key, {label?, color?, strike?, icon?, path?, image?, render?, symbol?, shape?}): restyle an existing
+    // status (an icon field replaces the current icon); redraws keeping viewport, collapse and selection; no event.
+    setStatusStyle(key, style) {
+      if (typeof key !== "string" || !Object.prototype.hasOwnProperty.call(statuses, key)) {
+        return { ok: false, errors: [{ path: "key", code: "bad_status", message: `Unknown status ${JSON.stringify(key)}` }] };
+      }
+      if (!isObj(style)) return { ok: false, errors: [{ path: "style", code: "bad_status", message: "style must be an object" }] };
+      const pick = {};
+      for (const k of STYLE_FIELDS) if (Object.prototype.hasOwnProperty.call(style, k)) pick[k] = style[k];
+      statuses[key] = mergeStatus(statuses[key], pick);
+      if (data && !destroyed) render();
+      return { ok: true };
+    },
     on(event, fn) {
       if (typeof fn !== "function") return () => {};
       if (!listeners.has(event)) listeners.set(event, new Set());
