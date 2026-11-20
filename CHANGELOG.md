@@ -10,7 +10,10 @@ Added (all additive; data format, operations, validation, outline / Mermaid outp
   `icon` `{viewBox, nodes, stroke}` in the Lucide `IconNode` format (whitelisted SVG geometry, 64 nodes, 8 KiB per `d`),
   `path` sugar, then `shape` / `symbol` / dot. The export skips `render` and non-`data:` images.
 - `strike: true` on any status (the default `superseded` has it).
-- `mm.setTheme(mode | {mode, tokens})`, `theme: {mode, tokens}` at creation (tokens become `--mm-<token>`).
+- Each used icon / image is one `<symbol>` in `<defs>`, drawn per node with `<use>` (map, outline, export); ids get a
+  per-component prefix and never contain the status key.
+- Named themes: `themes: {name: {base, tokens}}` (built-in `light` / `dark`, overridable), `theme` and `mm.setTheme(name |
+  null | {base, tokens})` (`{ok}` or `bad_theme`), `getState().theme`. Tokens become `--mm-<token>` on the component.
 - `mm.setStatusStyle(key, style)` for an existing status, keeping viewport, collapse and selection.
 - `actions[].icon` accepts an icon object.
 - `statusIcon(statusKey, statuses, theme)`: the export icon as a standalone `<svg>` string.

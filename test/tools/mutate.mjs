@@ -1,11 +1,15 @@
 // Mutation runner. Copies the repository once (with node_modules: the Lucide tests and the demo need the devDependency)
 // to a temporary directory; for each mutation in mutations.mjs it applies the edit there, runs the suite, checks that
 // the named test failed, and writes the edited files back. The working tree is never touched.
-// Usage: node test/tools/mutate.mjs [--suite unit|browser] [--only M01,M02]
+// After each mutation the runner compares the sha256 of every edited file with the original and aborts the whole run
+// (exit 3, "RESTORE FAILED") on a mismatch. Every run first proves that abort fires: it runs itself once with
+// --sabotage-restore (a test hook that writes a wrong byte back) and requires exit 3 (else exit 4, "SELF-CHECK FAILED").
+// Usage: node test/tools/mutate.mjs [--suite unit|browser] [--only M01,M02] [--no-self-check]
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { MUTATIONS } from "./mutations.mjs";
 
@@ -14,6 +18,19 @@ const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? pro
 const only = arg("--only") ? new Set(arg("--only").split(",")) : null;
 const suite = arg("--suite");
 const list = MUTATIONS.filter((m) => (!only || only.has(m.id)) && (!suite || m.suite === suite));
+const sabotage = process.argv.includes("--sabotage-restore");
+const sha = (s) => createHash("sha256").update(s).digest("hex");
+
+if (!sabotage && !process.argv.includes("--no-self-check")) {
+  const self = fileURLToPath(import.meta.url);
+  const r = spawnSync(process.execPath, [self, "--suite", "unit", "--only", "M39", "--sabotage-restore"], { encoding: "utf8", timeout: 300000 });
+  const out = (r.stdout || "") + (r.stderr || "");
+  if (r.status !== 3 || !out.includes("M39 RESTORE FAILED")) {
+    console.log(`SELF-CHECK FAILED: a broken restore must abort with exit 3, got exit ${r.status}\n${out}`);
+    process.exit(4);
+  }
+  console.log("self-check: a broken restore aborts the run (exit 3)");
+}
 
 function run(dir, which) {
   const files = which === "browser" ? ["test/unit/", "test/browser/interaction.test.mjs"] : ["test/unit/"];
@@ -32,7 +49,7 @@ if (b.code !== 0) { console.log(b.out.split("\n").filter((l) => l.startsWith("âœ
 let red = 0, survived = 0, notApplied = 0;
 for (const m of list) {
   const dir = base;
-  const original = new Map(); // file -> content before this mutation
+  const original = new Map(); // file -> content before this mutation (its sha256 is what restore must reproduce)
   let applied = true;
   for (const [file, find, replace] of m.edits) {
     const p = join(dir, file);
@@ -42,12 +59,14 @@ for (const m of list) {
     if (n !== 1) { applied = false; console.log(`${m.id} NOT APPLIED: "${find.slice(0, 60)}" found ${n} times in ${file}`); break; }
     writeFileSync(p, src.replace(find, () => replace));
   }
-  // Writes the edited files back and checks them against the repository: a later mutation must start from clean code.
+  // Writes the edited files back; the sha256 of each must equal the original, or the run stops: every later mutation
+  // must start from clean code.
   const restore = () => {
     for (const [p, src] of original) {
-      writeFileSync(p, src);
-      if (readFileSync(p, "utf8") !== readFileSync(join(ROOT, p.slice(dir.length)), "utf8")) {
-        console.log(`${m.id} RESTORE FAILED: ${p.slice(dir.length)} differs from the repository`);
+      writeFileSync(p, sabotage ? src + "\n" : src);
+      const got = sha(readFileSync(p)), want = sha(Buffer.from(src, "utf8"));
+      if (got !== want) {
+        console.log(`${m.id} RESTORE FAILED: ${p.slice(dir.length)} sha256 ${got.slice(0, 12)} != original ${want.slice(0, 12)}`);
         rmSync(base, { recursive: true, force: true });
         process.exit(3);
       }

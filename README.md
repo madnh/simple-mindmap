@@ -94,8 +94,8 @@ SVG export draw the **highest level present**:
 | Level | Field | Map and outline | SVG export |
 |---|---|---|---|
 | 1 | `render: (statusKey, status) => Element` | your element, called **once per status per draw** and copied per node; an SVG element is appended as is, any other element is wrapped in `<foreignObject>` (map) or a `<span>` (outline) | never called: the next level |
-| 2 | `image: url` | `<image>` (map) / `<img>` (outline), 12 x 12 | embedded only for a `data:` URL; any other URL: the next level |
-| 3 | `icon: {viewBox?, nodes, stroke?}` | a nested 12 x 12 `<svg>` | the same |
+| 2 | `image: url` | an `<image>`, 12 x 12 | embedded only for a `data:` URL; any other URL: the next level |
+| 3 | `icon: {viewBox?, nodes, stroke?}` | the icon, 12 x 12 | the same |
 | 3 | `path: "M..."` | sugar for `icon: {viewBox: "0 0 12 12", nodes: [["path", {d}]]}`, filled with the colour | the same |
 | 4 | `shape` | one of the six built-in symbols (`open`, `pending`, `decided`, `parked`, `blocked`, `superseded`) | the same |
 | 5 | `symbol` | a short text symbol | the same |
@@ -119,6 +119,11 @@ SVG export draw the **highest level present**:
   `img-src` for that origin (`data:` for data URLs).
 - A `render` that throws or returns something other than an Element: the next level draws and the component emits one
   `error {message, status}` per status per draw.
+- Each `icon`, `path` or `image` used in a view is defined **once**, as a `<symbol>` in `<defs>`, and every node draws a
+  `<use href="#...">` of it (map, outline and export alike; built-in shapes and text symbols stay inline). Ids are
+  `mm<n>-s-<i>` (map) and `mm<n>-os-<i>` (outline), with `<n>` unique per component on the page, and `mm-s-<i>` in the
+  export; they never contain the status key. For 2 000 nodes that all show a Lucide icon (`toSVG` with the test text measure), the
+  export is 1 287 334 bytes, against 1 653 799 bytes with the icon repeated per node.
 - `statusIcon(statusKey, statuses?, theme?)` (from `simple-mindmap`) returns the same icon as a standalone 12 x 12 `<svg>`
   string with the export rules, for your own legend or filter chips. `statuses` as you pass them to `createMindmap`.
 
@@ -140,7 +145,7 @@ const mm = createMindmap(el, {
   data,                      // JSON as above
   view: "both",              // "both" | "right" | "outline"
   mode: "view",              // "view" | "select" | "edit"
-  state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search, filter, filterOnly}; state.view wins over `view`
+  state: null,               // a saved getState(): {selected, collapsed, focus, view, viewport, search, filter, filterOnly, theme}; state.view and state.theme win over `view` and `theme`
   collapseDepth: null,       // collapse every node at this depth (root = 0) when there is no `state`
   actions: [],               // menu items of a node: [{id, label, icon?, when?(node) -> bool}]; icon: a short text symbol or an icon object ({viewBox?, nodes, stroke?}, as for statuses)
   strings: {},               // every visible text (see "Strings")
@@ -148,7 +153,8 @@ const mm = createMindmap(el, {
   badge: null,               // (node) -> {symbol, label} | null; a small extra mark you decide; called on every draw
   search: true, tools: true, // the floating search box and the tools; turn off when you draw your own
   limits: null,              // tighter limits: {nodes, depth, title, label, note, meta}
-  theme: null,               // "light" | "dark" to force a palette, or {mode?, tokens: {bg: "#...", ...}}; default follows prefers-color-scheme
+  themes: {},                // named themes: {name: {base?: "light" | "dark", tokens: {bg: "#...", ...}}}; "light" and "dark" are built in (and can be overridden)
+  theme: null,               // a theme name, an inline {base?, tokens}, or null (follow prefers-color-scheme)
   filter: null,              // null or a list of statuses: nodes whose status is not listed are dimmed (never hidden)
   filterOnly: false,         // outline only: with a filter, hide branches that contain no matching node
 });
@@ -162,16 +168,16 @@ const mm = createMindmap(el, {
 | `mm.focusSearch()` | puts the cursor in the search box of the open view (what Cmd/Ctrl+F does inside the component), for a host shortcut. `false` when there is no data or `search: false` |
 | `mm.setFilter(list \| null)` | dims every node whose status is not in `list` (a node without status never matches); returns `{ok: true}`, or `{ok: false, errors}` with `bad_status` for an unknown status (nothing changes) |
 | `mm.setFilterOnly(bool)` | outline: hide branches without a match while a filter is set; returns `{ok: true}` |
-| `mm.setTheme("light" \| "dark" \| null \| {mode?, tokens})` | replaces the theme set so far (see "Theming"); no redraw, no event; returns `false` for a value it does not accept |
+| `mm.setTheme(name \| null \| {base?, tokens})` | switches the theme (see "Theming"): the previous theme's tokens are removed; no redraw, no event. Returns `{ok: true}`, or `{ok: false, errors: [{code: "bad_theme", path: "theme"}]}` for an unknown name or a bad value (nothing changes) |
 | `mm.setStatusStyle(key, {label?, color?, strike?, icon?, path?, image?, render?, symbol?, shape?})` | restyles an existing status and redraws, keeping viewport, collapse and selection; an icon field replaces the current icon, `null` clears a field; no event. Returns `{ok: true}`, or `{ok: false, errors}` with `bad_status` for an unknown key (the set of keys is fixed at creation) |
 | `mm.search(q)` `mm.next()` `mm.prev()` | `{hits: [ids], index}`; matches titles (case and accent insensitive) and position numbers, never internal ids |
 | `mm.getData()` | a deep copy of the current data (no view state), or `null` before any valid data |
 | `mm.getNode(id)` | `{id, path, parent, children: [ids], node: {id, title, note?, status?, tone?, collapsed?, meta?}}` (a copy) or `null` |
 | `mm.getPath(id)` | `"3.2"` (root: `""`) or `null` |
 | `mm.find(q)` | ids that match, same rule as the search box |
-| `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search, filter, filterOnly}` |
+| `mm.getState()` | `{selected, collapsed, focus, view, viewport: {x, y, k}, search, filter, filterOnly, theme}` (`theme`: the theme name, or `null` for the OS or an inline theme) |
 | `mm.export(fmt)` | `"json"`, `"outline"` (Markdown), `"mermaid"`, `"svg"` (the current view, measured by this page, concrete colours); `null` before valid data |
-| `mm.errors` / `mm.warnings` | the last validation result (copies); `warnings` also lists ignored theme tokens (`theme.tokens.<name>`) |
+| `mm.errors` / `mm.warnings` | the last validation result (copies); `warnings` also lists ignored themes and theme tokens (`themes.<name>`, `theme.tokens.<name>`, `theme`) |
 | `mm.on(event, fn)` | returns a function that removes the listener |
 | `mm.destroy()` | removes the component and every listener |
 
@@ -302,11 +308,30 @@ A dark palette applies under `prefers-color-scheme: dark` unless `data-theme="li
 A `--mm-*` value you set always wins over both palettes. The defaults live in private `--mmd-*` variables, which are
 internal and not part of the 1.x API.
 
-- At runtime: `mm.setTheme("dark")`, `mm.setTheme("light")`, `mm.setTheme(null)` (follow the OS). Setting or removing
-  `data-theme` on the component element by hand works the same way. Nothing is redrawn: every colour is a CSS variable.
-- Without writing CSS: `theme: {mode: "light", tokens: {bg: "#fbf7ef", "node-bg": "#fffdf8", "edge-0": "#b5651d"}}` sets
-  `--mm-<token>` on the component (token names as above without `--mm-`, plus `font` and `mono`); `mm.setTheme` takes the same
-  object and replaces the tokens set before. Unknown names are ignored and listed in `mm.warnings`.
+Themes are not limited to light and dark. There are two ways, and they combine:
+
+- **Named themes, no CSS**: register them, then pick one by name.
+
+  ```js
+  const mm = createMindmap(el, { data, theme: "solarized", themes: {
+    solarized: { base: "light", tokens: { bg: "#fdf6e3", "node-bg": "#eee8d5", text: "#586e75", "edge-0": "#268bd2" } },
+    midnight: { base: "dark", tokens: { bg: "#0b1020", "node-bg": "#121a33", text: "#d8e0ff" } },
+  } });
+  mm.setTheme("midnight");      // {ok: true}; mm.getState().theme === "midnight"
+  mm.setTheme("nope");          // {ok: false, errors: [{code: "bad_theme", path: "theme", ...}]}, nothing changes
+  mm.setTheme(null);            // the built-in light / dark, following the OS
+  mm.setTheme({ base: "dark", tokens: { bg: "#000" } }); // inline, unnamed (getState().theme === null)
+  ```
+
+  `base` ("light" by default) is the palette under every token the theme does not set; it becomes `data-theme` on the
+  component. Token names are the variables above without `--mm-` (28 colours, `font`, `mono`); they are set inline as
+  `--mm-<token>` on the component, and a switch removes the previous theme's tokens. `"light"` and `"dark"` are built in
+  and can be overridden in `themes`. Unknown token names and bad themes are ignored and listed in `mm.warnings`.
+- **CSS classes**: any number of themes as classes that set `--mm-*` on an ancestor (`.brand-sea { --mm-bg: ...; }`),
+  plus `data-theme` for the base palette (by hand, or `setTheme("dark")`). The tokens of a named or inline theme are
+  inline on the component root, so they beat the same variable set by your ancestor CSS; variables the theme does not set
+  still come from your CSS.
+- Nothing is redrawn on a switch, and no event is emitted: every colour is a CSS variable.
 - `export("svg")` reads the computed values, so the file follows the live theme (palette, tokens, your CSS) with concrete
   colours and opens anywhere.
 - The palettes are exported as `THEME` and `DARK_THEME`: `toSVG(json, {theme: DARK_THEME})` is a dark file without a page.
@@ -367,7 +392,9 @@ reported as skipped, not passed.
 Every important check has a documented mutation in `test/tools/mutations.mjs`: a small change to the source that must
 turn a named test red. `npm run mutate` copies the repository to a temporary directory, applies each mutation there
 (the working tree is never touched), runs the suite and reports, per mutation, whether the expected test failed.
-It exits non-zero when a mutation survives or no longer applies.
+It exits non-zero when a mutation survives or no longer applies. One copy is reused: after each mutation the edited
+files are written back and their sha256 must equal the original, or the run aborts (exit 3); every run first proves
+that abort fires by running itself once with a deliberately broken restore (`--sabotage-restore`; exit 4 if it does not).
 
 ```sh
 npm run mutate                          # all mutations (unit and browser; several minutes)

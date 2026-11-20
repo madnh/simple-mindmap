@@ -116,6 +116,22 @@ test("image: scheme filter; the export embeds data: only (0 external hrefs)", ()
   assert.equal(count(svgOf({ x: { label: "X", image: PNG } }), "<image"), 1);
 });
 
+test("A1: the export defines each icon once as <symbol id=mm-s-N> and every node draws a <use href=#...>", () => {
+  const st = { secretkey: { label: "S", icon: { nodes: CHECK, stroke: true } }, other: { label: "O", image: PNG }, plain: { label: "P", shape: "open" } };
+  const d = { root: { id: "r", title: "R", children: [1, 2, 3, 4, 5, 6].map((i) => ({ id: "n" + i, title: "N" + i, status: i < 4 ? "secretkey" : i < 6 ? "other" : "plain" })) } };
+  const s = toSVG(d, { statuses: st, measure: fakeMeasure });
+  assert.equal(count(s, "<symbol"), 2);
+  assert.deepEqual([...s.matchAll(/<symbol id="([^"]+)"/g)].map((m) => m[1]), ["mm-s-0", "mm-s-1"]);
+  assert.equal(count(s, "<use "), 5);
+  assert.equal(count(s, "<svg"), 1, "no nested svg per node");
+  const hrefs = [...s.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+  assert.ok(hrefs.every((h) => h.startsWith("#") || h === PNG), hrefs.join());
+  assert.equal(hrefs.filter((h) => h.startsWith("#")).length, 5);
+  assert.equal(count(s, "secretkey"), 0, "ids are never derived from the status key");
+  assert.equal(count(s, 'd="M20 6 9 17l-5-5"'), 1, "the icon body appears once");
+  assert.ok(s.indexOf("<defs>") < s.indexOf("<use "), "defs come before the nodes");
+});
+
 test("statusIcon: a standalone 12 x 12 svg with the export rules; statuses as given to createMindmap", () => {
   const s = statusIcon("decided");
   assert.ok(s.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"'), s);

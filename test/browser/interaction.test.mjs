@@ -541,8 +541,9 @@ t("map and outline draw the same icon levels (icon, image, render, symbol over a
     make({ data: ${JSON.stringify(ICONS)}, view: "right", statuses: ${ICON_STATUSES} });
     await new Promise((r) => setTimeout(r, 0));
     const q = (id, sel) => document.querySelector('#host [data-id="' + id + '"] ' + sel);
+    const via = (u) => (u ? document.querySelector("#host " + u.getAttribute("href")) : null); // <use> -> its <symbol>
     const map = {
-      icon: !!q("a", ".mm-status svg path[d='M1 1L11 11']"), image: q("b", ".mm-status image")?.getAttribute("href"),
+      icon: !!via(q("a", ".mm-status use"))?.querySelector("path[d='M1 1L11 11']"), image: via(q("b", ".mm-status use"))?.querySelector("image")?.getAttribute("href"),
       render: !!q("c", ".mm-status .mm-status-render circle.custom-open"),
       symbol: [...document.querySelectorAll('#host [data-id="d"] .mm-status text')].map((t) => t.textContent),
       plain: !!q("g", ".mm-status circle"),
@@ -552,7 +553,7 @@ t("map and outline draw the same icon levels (icon, image, render, symbol over a
     await new Promise((r) => setTimeout(r, 0));
     const row = (id) => document.querySelector('#host li[data-id="' + id + '"] > .mm-row');
     const outline = {
-      icon: !!row("a").querySelector("svg.mm-sym svg path[d='M1 1L11 11']"), image: row("b").querySelector("img.mm-sym")?.getAttribute("src"),
+      icon: !!via(row("a").querySelector("svg.mm-sym use"))?.querySelector("path[d='M1 1L11 11']"), image: via(row("b").querySelector("svg.mm-sym use"))?.querySelector("image")?.getAttribute("href"),
       render: !!row("c").querySelector("span.mm-sym-render circle.custom-open"),
       symbol: row("d").querySelector("svg.mm-sym text")?.textContent,
       strike: ["e", "f", "d"].map((id) => row(id).classList.contains("is-superseded")),
@@ -599,31 +600,99 @@ t("status render(): once per status key per draw (copied per node), never for th
   assert.ok(r.msg.includes("boom"));
 });
 
-t("theme: setTheme and the tokens map set the palette with no event and no redraw; export colours follow; unknown tokens warn", async () => {
+const THEMES = `{
+  solarized: { base: "light", tokens: { bg: "#fdf6e3", "node-bg": "#eee8d5" } },
+  midnight: { base: "dark", tokens: { bg: "#0b1020" } },
+  light: { tokens: { "edge-0": "#111111" } },
+  broken: { base: "blue" },
+}`;
+
+t("themes: named themes on a light/dark base; a switch removes the old tokens; unknown name changes nothing; export follows; no event, no redraw", async () => {
   const r = await ev(`
-    make({ data: ${JSON.stringify(SMALL)}, theme: { mode: "dark", tokens: { "node-bg": "#010203", nonsense: "#fff", bg: 5 } } });
+    make({ data: ${JSON.stringify(SMALL)}, themes: ${THEMES}, theme: "solarized" });
     await new Promise((r) => setTimeout(r, 0));
     const w = document.querySelector("#host .simple-mindmap");
     const n0 = events.length;
     const node = document.querySelector('#host [data-id="a"]');
-    const out = { mode0: w.dataset.theme, exp0: mm.export("svg"), warn0: mm.warnings.map((x) => [x.path, x.code]) };
-    out.set1 = mm.setTheme("light"); out.mode1 = w.dataset.theme; out.exp1 = mm.export("svg");
-    out.set2 = mm.setTheme(null); out.mode2 = w.dataset.theme ?? null;
-    out.set3 = mm.setTheme({ tokens: { bg: "#0a0b0c" } }); out.exp3 = mm.export("svg"); out.warn3 = mm.warnings.length;
-    out.bad = [mm.setTheme("blue"), mm.setTheme(42), mm.setTheme({ tokens: "x" })];
+    const tok = (k) => w.style.getPropertyValue("--mm-" + k);
+    const snap = () => ({ mode: w.dataset.theme ?? null, bg: tok("bg"), nodeBg: tok("node-bg"), edge0: tok("edge-0"), state: mm.getState().theme });
+    const out = { s0: snap(), exp0: mm.export("svg"), warn0: mm.warnings.map((x) => [x.path, x.code]) };
+    out.r1 = mm.setTheme("midnight"); out.s1 = snap(); out.exp1 = mm.export("svg");
+    out.r2 = mm.setTheme("nope"); out.s2 = snap();
+    out.bad = [42, { base: "blue" }, { tokens: "x" }, "broken"].map((x) => mm.setTheme(x).errors?.[0]?.code); out.s3 = snap();
+    out.r4 = mm.setTheme({ base: "dark", tokens: { bg: "#000001", nonsense: "x" } }); out.s4 = snap(); out.warn4 = mm.warnings.map((x) => [x.path, x.code]);
+    out.r5 = mm.setTheme("light"); out.s5 = snap();
+    out.r6 = mm.setTheme(null); out.s6 = snap();
     out.sameNode = node === document.querySelector('#host [data-id="a"]');
     out.events = events.slice(n0).map((x) => x.e);
     return out;`);
-  assert.equal(r.mode0, "dark");
-  assert.ok(r.exp0.includes("#010203") && r.exp0.includes("#0d1117"), "dark palette plus the token");
-  assert.deepEqual(r.warn0, [["theme.tokens.nonsense", "unknown_key"], ["theme.tokens.bg", "bad_value"]]);
-  assert.equal(r.set1, true); assert.equal(r.mode1, "light");
-  assert.ok(r.exp1.includes("#ffffff") && !r.exp1.includes("#010203"), "setTheme replaces the tokens set before");
-  assert.equal(r.set2, true); assert.equal(r.mode2, null);
-  assert.equal(r.set3, true); assert.ok(r.exp3.includes("#0a0b0c")); assert.equal(r.warn3, 0);
-  assert.deepEqual(r.bad, [false, false, false]);
+  assert.deepEqual(r.s0, { mode: "light", bg: "#fdf6e3", nodeBg: "#eee8d5", edge0: "", state: "solarized" });
+  assert.ok(r.exp0.includes("#fdf6e3") && r.exp0.includes("#eee8d5"));
+  assert.deepEqual(r.warn0, [["themes.broken", "bad_value"]]);
+  assert.deepEqual(r.r1, { ok: true });
+  assert.deepEqual(r.s1, { mode: "dark", bg: "#0b1020", nodeBg: "", edge0: "", state: "midnight" }, "the old theme's tokens are removed");
+  assert.ok(r.exp1.includes("#0b1020") && r.exp1.includes("#161b22") && !r.exp1.includes("#eee8d5"), "dark base under the theme");
+  assert.equal(r.r2.ok, false); assert.equal(r.r2.errors[0].code, "bad_theme"); assert.equal(r.r2.errors[0].path, "theme");
+  assert.deepEqual(r.s2, r.s1, "an unknown name changes nothing");
+  assert.deepEqual(r.bad, ["bad_theme", "bad_theme", "bad_theme", "bad_theme"]); assert.deepEqual(r.s3, r.s1);
+  assert.deepEqual(r.r4, { ok: true });
+  assert.deepEqual(r.s4, { mode: "dark", bg: "#000001", nodeBg: "", edge0: "", state: null }, "an inline theme has no name");
+  assert.deepEqual(r.warn4, [["themes.broken", "bad_value"], ["theme.tokens.nonsense", "unknown_key"]]);
+  assert.deepEqual(r.s5, { mode: "light", bg: "", nodeBg: "", edge0: "#111111", state: "light" }, "a host override of the built-in light");
+  assert.deepEqual(r.s6, { mode: null, bg: "", nodeBg: "", edge0: "", state: null }, "null follows the OS");
   assert.equal(r.sameNode, true, "no redraw");
   assert.deepEqual(r.events, []);
+});
+
+t("themes: getState().theme round trip restores the named theme; an old state without theme keeps the option", async () => {
+  const r = await ev(`
+    make({ data: ${JSON.stringify(SMALL)}, themes: ${THEMES}, theme: "solarized" });
+    mm.setTheme("midnight");
+    const st = mm.getState();
+    make({ data: ${JSON.stringify(SMALL)}, themes: ${THEMES}, theme: "solarized", state: st });
+    const w = () => document.querySelector("#host .simple-mindmap");
+    const a = { theme: mm.getState().theme, mode: w().dataset.theme, bg: w().style.getPropertyValue("--mm-bg") };
+    const { theme, ...old } = st;
+    make({ data: ${JSON.stringify(SMALL)}, themes: ${THEMES}, theme: "solarized", state: old });
+    const b = { theme: mm.getState().theme, bg: w().style.getPropertyValue("--mm-bg") };
+    make({ data: ${JSON.stringify(SMALL)}, theme: "nope" });
+    const c = { theme: mm.getState().theme, mode: w().dataset.theme ?? null, warn: mm.warnings.map((x) => x.code) };
+    return { st: st.theme, a, b, c };`);
+  assert.equal(r.st, "midnight");
+  assert.deepEqual(r.a, { theme: "midnight", mode: "dark", bg: "#0b1020" });
+  assert.deepEqual(r.b, { theme: "solarized", bg: "#fdf6e3" });
+  assert.deepEqual(r.c, { theme: null, mode: null, warn: ["bad_theme"] });
+});
+
+t("A1: icons are <symbol>s used per node; ids carry a per-instance prefix and never the status key; outline has one hidden defs svg", async () => {
+  const r = await ev(`
+    const host = document.getElementById("host");
+    const second = document.createElement("div"); second.id = "host2"; second.style.cssText = "position:absolute;left:0;top:700px;width:600px;height:300px";
+    document.body.appendChild(second);
+    try {
+      const st = { secretkey: { label: "S", icon: { nodes: [["circle", { cx: 12, cy: 12, r: 9 }]] } }, other: { label: "O", path: "M1 1L11 11" } };
+      const data = { root: { id: "r", title: "R", children: [1, 2, 3, 4].map((i) => ({ id: "n" + i, title: "N" + i, status: i < 4 ? "secretkey" : "other" })) } };
+      make({ data, view: "right", statuses: st });
+      const mm2 = SM.createMindmap(second, { data, view: "right", statuses: st });
+      const ids = (el) => [...el.querySelectorAll("symbol")].map((s) => s.id);
+      const uses = (el) => [...el.querySelectorAll(".mm-status use")].map((u) => u.getAttribute("href"));
+      const out = { ids1: ids(host), ids2: ids(second), uses1: uses(host), resolved: uses(host).every((h) => host.querySelector(h)) };
+      mm.setView("outline");
+      out.outlineDefs = host.querySelectorAll(".mm-outline svg.mm-defs").length;
+      out.outlineIds = ids(host);
+      out.rowUses = [...host.querySelectorAll(".mm-row svg.mm-sym use")].map((u) => u.getAttribute("href"));
+      out.rowResolved = out.rowUses.every((h) => host.querySelector(h));
+      mm2.destroy();
+      return out;
+    } finally { second.remove(); }`);
+  assert.equal(r.ids1.length, 2); assert.equal(r.ids2.length, 2);
+  assert.equal(new Set([...r.ids1, ...r.ids2]).size, 4, `ids collide: ${r.ids1} / ${r.ids2}`);
+  assert.ok(r.ids1.every((id) => /^mm\d+-s-\d+$/.test(id) && !id.includes("secret")), r.ids1.join());
+  assert.equal(r.uses1.length, 4); assert.ok(r.resolved);
+  assert.ok(r.uses1.every((h) => h.startsWith("#")));
+  assert.equal(r.outlineDefs, 1);
+  assert.ok(r.outlineIds.length === 2 && r.outlineIds.every((id) => /^mm\d+-os-\d+$/.test(id)), r.outlineIds.join());
+  assert.equal(r.rowUses.length, 4); assert.ok(r.rowResolved);
 });
 
 t("export: a raw var() status colour is resolved by the page (computed rgb); the file never contains var(", async () => {
@@ -647,7 +716,8 @@ t("setStatusStyle: restyles an existing status, keeping viewport, collapse and s
     const n0 = events.length;
     const ok = mm.setStatusStyle("decided", { color: "red", icon: { nodes: [["circle", { cx: 12, cy: 12, r: 8 }]] } });
     const st1 = JSON.stringify(mm.getState());
-    const icon = !!document.querySelector('#host [data-id="a"] .mm-status svg circle[r="8"]');
+    const u = document.querySelector('#host [data-id="a"] .mm-status use');
+    const icon = !!(u && document.querySelector("#host " + u.getAttribute("href") + ' circle[r="8"]'));
     const shape = !!document.querySelector('#host [data-id="a"] .mm-status path');
     const label = mm.export("svg").includes("<title>Decided</title>");
     const back = mm.setStatusStyle("decided", { icon: null, shape: "decided" });
@@ -688,7 +758,8 @@ t("Lucide in the page: icon {nodes, stroke} and render via lucide createElement 
       pending: { color: "amber", render: () => L.createElement(L.Hourglass, { width: 12, height: 12 }) },
     } });
     await new Promise((r) => setTimeout(r, 0));
-    const a = document.querySelector('#host [data-id="a"] .mm-status svg');
+    const ua = document.querySelector('#host [data-id="a"] .mm-status use');
+    const a = ua && document.querySelector("#host " + ua.getAttribute("href"));
     const b = document.querySelector('#host [data-id="b"] .mm-status .mm-status-render svg');
     const out = { a: a && ["viewBox", "fill", "stroke-width", "stroke-linecap", "stroke-linejoin"].map((k) => a.getAttribute(k)), aKids: a ? a.children.length : 0, b: !!b && b.getAttribute("stroke") };
     const data = await fixture("large-2000.json");

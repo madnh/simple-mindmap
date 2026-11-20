@@ -21,15 +21,16 @@ test("demo/index.html draws the sample without errors", { timeout: 60000, skip: 
     await page.waitFor("document.querySelectorAll('#map .mm-status-render').length > 0");
     const m = await page.eval(`(() => {
       const q = (s) => document.querySelectorAll('#map ' + s).length;
-      return { lucide: q(".mm-status svg[viewBox='0 0 24 24']"), image: q(".mm-status image"), element: q(".mm-status-render demo-badge"), icon: q(".mm-status svg path[d='M6 1L11 6L6 11L1 6Z']") };
+      return { lucide: q("symbol[viewBox='0 0 24 24']"), image: q("symbol image"), element: q(".mm-status-render demo-badge"), icon: q("symbol path[d='M6 1L11 6L6 11L1 6Z']"), uses: q(".mm-status use") };
     })()`);
     for (const [k, v] of Object.entries(m)) assert.ok(v > 0, `${k} drawn (${v})`);
     await page.eval(`(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event("change")); };
       set("styleKey", "open"); set("styleColor", "red"); set("styleIcon", "hand"); document.getElementById("styleApply").click(); })()`);
     assert.equal(await page.eval("document.getElementById('styleResult').textContent"), '{"ok":true}');
-    await page.eval(`(() => { const e = document.getElementById("theme"); e.value = "custom"; e.dispatchEvent(new Event("change")); })()`);
-    assert.match(await page.eval("document.getElementById('result').textContent"), /setTheme -> true/);
-    assert.equal(await page.eval("document.querySelector('#map .simple-mindmap').style.getPropertyValue('--mm-bg')"), "#fbf7ef");
+    await page.eval(`(() => { const e = document.getElementById("theme"); e.value = "solarized"; e.dispatchEvent(new Event("change")); })()`);
+    assert.match(await page.eval("document.getElementById('result').textContent"), /setTheme -> \{"ok":true\}/);
+    assert.equal(await page.eval("document.querySelector('#map .simple-mindmap').style.getPropertyValue('--mm-bg')"), "#fdf6e3");
+    assert.ok((await page.eval("document.querySelector('#map').querySelector('.simple-mindmap').dataset.theme")) === "light");
     await page.eval("window.URL.createObjectURL = () => 'blob:x'; HTMLAnchorElement.prototype.click = () => {}; document.querySelector('[data-export=svg]').click()");
     const lv = await page.eval("document.getElementById('levels').textContent");
     assert.match(lv, /parked: map image, export symbol \(fell back\)/);

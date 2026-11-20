@@ -1,5 +1,5 @@
 // Outline view: the tree as nested rows. DOM only through createElement / textContent.
-import { statusShape, statusLevel, isStrike } from "./svg.js";
+import { statusShape, statusLevel, isStrike, symbolRegistry } from "./svg.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -27,8 +27,9 @@ export function specToDom(doc, spec, hooks) {
   return node;
 }
 
-// The row symbol: same levels as the map. render -> a span holding a copy of the element, image -> <img>, else <svg>.
-function symbol(doc, n, statuses, hooks) {
+// The row symbol: same levels as the map. render -> a span holding a copy of the element; icon and image -> a <use>
+// of the outline's shared <symbol> (symbols: the registry); shapes, symbols and dots inline.
+function symbol(doc, n, statuses, hooks, symbols) {
   if (n.status && statuses[n.status]) {
     const lv = statusLevel(n.status, statuses, { rendered: hooks && hooks.rendered });
     if (lv.level === "render") {
@@ -38,25 +39,21 @@ function symbol(doc, n, statuses, hooks) {
       if (got) span.appendChild(got);
       return span;
     }
-    if (lv.level === "image") {
-      const img = doc.createElement("img");
-      img.className = "mm-sym"; img.alt = ""; img.width = 12; img.height = 12; img.setAttribute("aria-hidden", "true");
-      img.src = lv.url;
-      return img;
-    }
   }
   const svg = doc.createElementNS(SVG_NS, "svg");
   svg.setAttribute("class", "mm-sym");
   svg.setAttribute("viewBox", "0 0 12 12");
   svg.setAttribute("aria-hidden", "true");
-  if (n.status) { const s = statusShape(n.status, statuses, 6, 6); if (s) svg.appendChild(specToDom(doc, s)); }
+  if (n.status) { const s = statusShape(n.status, statuses, 6, 6, { symbols }); if (s) svg.appendChild(specToDom(doc, s)); }
   else if (n.tone) svg.appendChild(specToDom(doc, { t: "circle", a: { cx: 6, cy: 6, r: 4 }, p: { fill: { tok: n.tone } } }));
   return svg;
 }
 
-// ctx: {doc, data, idx, rootId, collapsed, selected, hits, current, statuses, strings, badge, dim, keep, hooks}
+// ctx: {doc, data, idx, rootId, collapsed, selected, hits, current, statuses, strings, badge, dim, keep, hooks, uid}
+// -> {tree, rows, order, defs}: defs is one hidden <svg> holding the <symbol>s the rows reference.
 export function buildOutline(ctx) {
   const { doc, idx, collapsed, statuses } = ctx;
+  const symbols = symbolRegistry(`${ctx.uid || "mm"}-os`);
   const tree = doc.createElement("ul");
   tree.className = "mm-tree";
   tree.setAttribute("role", "tree");
@@ -92,7 +89,7 @@ export function buildOutline(ctx) {
     } else {
       const pad = doc.createElement("span"); pad.className = "mm-arrow-pad"; row.appendChild(pad);
     }
-    if (e.parentId) row.appendChild(symbol(doc, n, statuses, ctx.hooks));
+    if (e.parentId) row.appendChild(symbol(doc, n, statuses, ctx.hooks, symbols));
     if (e.num) { const num = doc.createElement("span"); num.className = "mm-num"; num.textContent = e.num; row.appendChild(num); }
     const title = doc.createElement("span"); title.className = "mm-title"; title.textContent = n.title; row.appendChild(title);
     if (n.status && statuses[n.status] && statuses[n.status].label) row.title = statuses[n.status].label;
@@ -111,6 +108,11 @@ export function buildOutline(ctx) {
       for (const k of kids) rec(k, ul, level + 1);
     }
   })(ctx.rootId, tree, 1);
-  return { tree, rows, order };
+  const defs = doc.createElementNS(SVG_NS, "svg");
+  defs.setAttribute("class", "mm-defs"); defs.setAttribute("aria-hidden", "true"); defs.setAttribute("width", "0"); defs.setAttribute("height", "0");
+  const d = doc.createElementNS(SVG_NS, "defs");
+  for (const sp of symbols.defs) d.appendChild(specToDom(doc, sp));
+  defs.appendChild(d);
+  return { tree, rows, order, defs };
 }
 

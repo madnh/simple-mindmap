@@ -129,14 +129,43 @@ export function imageUrl(u) {
   return ["https", "http", "blob"].includes(m[1].toLowerCase()) ? s : null;
 }
 
-// A sanitized icon drawn 12 x 12 centred at cx, cy as a nested <svg> (same in the map, the outline and the export).
-export function iconSpec(ic, c, cx, cy) {
-  const a = { x: cx - 6, y: cy - 6, width: 12, height: 12, viewBox: ic.viewBox, overflow: "visible" };
+// The body of a sanitized icon in colour c: attributes + paint of the wrapper (<svg> or <symbol>) and its children.
+function iconBody(ic, c) {
+  const a = { viewBox: ic.viewBox, overflow: "visible" };
   const p = {};
   if (ic.stroke) { Object.assign(a, { fill: "none", "stroke-width": 2, "stroke-linecap": "round", "stroke-linejoin": "round" }); p.stroke = c; }
   else p.fill = c;
   const conv = (n) => el(n.t, n.a, { p: Object.fromEntries(n.fills.map((k) => [k, c])), k: n.k.map(conv) });
-  return el("svg", a, { p, k: ic.nodes.map(conv) });
+  return { a, p, k: ic.nodes.map(conv) };
+}
+
+// A sanitized icon drawn 12 x 12 centred at cx, cy as a nested <svg> (statusIcon, menu icons).
+export function iconSpec(ic, c, cx, cy) {
+  const b = iconBody(ic, c);
+  return el("svg", { x: cx - 6, y: cy - 6, width: 12, height: 12, ...b.a }, { p: b.p, k: b.k });
+}
+
+// The <symbol> of an icon or image level (A1: defined once per view, every node draws a <use>).
+function symbolSpec(id, lv, c) {
+  if (lv.level === "image") {
+    return el("symbol", { id, viewBox: "0 0 12 12" }, { k: [el("image", { href: lv.url, x: 0, y: 0, width: 12, height: 12, preserveAspectRatio: "xMidYMid meet" })] });
+  }
+  const b = iconBody(lv.icon, c);
+  return el("symbol", { id, ...b.a }, { p: b.p, k: b.k });
+}
+
+// A registry of status symbols for one view: symbolFor(key, make) -> id; `defs` lists the <symbol> specs in first-use
+// order. Ids are `<prefix>-<n>` (n = first-use index), never derived from the status key.
+export function symbolRegistry(prefix) {
+  const ids = new Map();
+  const defs = [];
+  return {
+    defs,
+    symbolFor(key, make) {
+      if (!ids.has(key)) { const id = `${prefix}-${ids.size}`; ids.set(key, id); defs.push(make(id)); }
+      return ids.get(key);
+    },
+  };
 }
 
 // Which level draws status `key`: {level: "render" | "image" | "icon" | "shape" | "symbol" | "dot", url?, icon?}.
@@ -167,7 +196,8 @@ const r2 = (v) => Math.round(v * 100) / 100;
 const paint = (tok) => (TOKENS.includes(tok) ? { tok } : { raw: String(tok) });
 const el = (t, a = {}, extra = {}) => ({ t, a, ...extra });
 
-// A status symbol (or tone dot) centred at cx, cy. o: {export, rendered} as for statusLevel.
+// A status symbol (or tone dot) centred at cx, cy. o: {export, rendered} as for statusLevel; o.symbols (a registry):
+// icon and image levels become <use> of a shared <symbol>; without it they are drawn inline.
 export function statusShape(key, statuses, cx, cy, o = {}) {
   const s = statuses[key];
   if (!s) return null;
@@ -176,7 +206,10 @@ export function statusShape(key, statuses, cx, cy, o = {}) {
   const kids = [];
   const lv = statusLevel(key, statuses, o);
   if (lv.level === "render") kids.push(el("svg", { x: cx - 6, y: cy - 6, width: 12, height: 12, viewBox: "0 0 12 12", overflow: "visible" }, { c: "mm-status-render", rk: key }));
-  else if (lv.level === "image") kids.push(el("image", { href: lv.url, x: cx - 6, y: cy - 6, width: 12, height: 12, preserveAspectRatio: "xMidYMid meet" }));
+  else if ((lv.level === "image" || lv.level === "icon") && o.symbols) {
+    const id = o.symbols.symbolFor(key, (sid) => symbolSpec(sid, lv, c));
+    kids.push(el("use", { href: `#${id}`, x: cx - 6, y: cy - 6, width: 12, height: 12 }));
+  } else if (lv.level === "image") kids.push(el("image", { href: lv.url, x: cx - 6, y: cy - 6, width: 12, height: 12, preserveAspectRatio: "xMidYMid meet" }));
   else if (lv.level === "icon") kids.push(iconSpec(lv.icon, c, cx, cy));
   else switch (lv.level === "shape" ? s.shape : null) {
     case "open": kids.push(ring); break;
@@ -215,6 +248,7 @@ export function scene(data, lay, opts = {}) {
   const strings = { ...DEFAULT_STRINGS, ...(opts.strings || {}) };
   const uid = opts.uid || "mm";
   const idx = indexTree(data);
+  const symbols = symbolRegistry(`${uid}-s`);
   const edges = lay.edges.map((e) => {
     const p = lay.boxes.get(e.from), c = lay.boxes.get(e.to);
     return el("path", { d: edgePath(p, c, lay.view), fill: "none", "stroke-width": p.root ? 2 : 1.5 }, { c: "mm-edge", p: { stroke: paint(`edge-${(e.branch ?? 0) % 8}`) } });
@@ -272,7 +306,7 @@ export function scene(data, lay, opts = {}) {
     const cy = b.h / 2;
     if (!b.root) {
       const sx = GEOM.padX + GEOM.sym / 2;
-      if (n.status) { const s = statusShape(n.status, statuses, sx, cy, { export: opts.export, rendered: opts.rendered }); if (s) kids.push(s); }
+      if (n.status) { const s = statusShape(n.status, statuses, sx, cy, { export: opts.export, rendered: opts.rendered, symbols }); if (s) kids.push(s); }
       else if (n.tone) kids.push(toneDot(n.tone, sx, cy));
     }
     if (b.num) kids.push(el("text", { x: b.numX, y: cy, "dominant-baseline": "central", "font-size": FONT_SIZE.num, "font-family": MONO }, { c: "mm-num", p: { fill: paint("muted") }, x: b.num }));
@@ -305,7 +339,7 @@ export function scene(data, lay, opts = {}) {
     if (opts.dim && opts.dim.has(b.id)) ga.opacity = 0.35;
     return el("g", ga, { c: cls.join(" "), k: kids });
   });
-  return { bounds: lay.bounds, defs, edges, links, nodes };
+  return { bounds: lay.bounds, defs: [...defs, ...symbols.defs], edges, links, nodes };
 }
 
 // ---- serialisation ----

@@ -33,7 +33,7 @@
     <option value="invalid">Invalid data</option>
   </select></label>
   <label>Mode <select id="mode"><option>view</option><option selected>select</option><option>edit</option></select></label>
-  <label>Theme <select id="theme"><option value="">OS</option><option>light</option><option>dark</option><option value="custom">custom palette (tokens)</option></select></label>
+  <label>Theme <select id="theme"><option value="">OS</option><option>light</option><option>dark</option><option>solarized</option><option>midnight</option></select></label>
   <label>Status icons <select id="icons"><option value="">built-in</option><option value="mixed" selected>mixed levels (path, Lucide, images, element)</option></select></label>
   <label><input type="checkbox" id="autoApply" checked> apply edit intents</label>
 </header>
@@ -109,8 +109,14 @@ function mixedStatuses() {
     superseded: { ...ICON.data() },
   };
 }
-const PALETTE = { mode: "light", tokens: { bg: "#fbf7ef", "node-bg": "#fffdf8", "node-border": "#d9c9a8", text: "#3b2f1e", "edge-0": "#b5651d", "edge-1": "#2e8b57", "edge-2": "#4169e1", "edge-3": "#8b008b" } };
-function themeValue() { const v = $("theme").value; return v === "custom" ? PALETTE : v || null; }
+// named themes on a light / dark base (the registry); the picker switches with mm.setTheme(name)
+const THEMES = {
+  solarized: { base: "light", tokens: { bg: "#fdf6e3", "node-bg": "#eee8d5", "node-border": "#d6cfb4", text: "#586e75", muted: "#93a1a1", "chip-bg": "#e4ddc8",
+    "edge-0": "#268bd2", "edge-1": "#cb4b16", "edge-2": "#859900", "edge-3": "#6c71c4", "edge-4": "#dc322f", "edge-5": "#2aa198", "edge-6": "#b58900", "edge-7": "#93a1a1" } },
+  midnight: { base: "dark", tokens: { bg: "#0b1020", "node-bg": "#121a33", "node-border": "#26335c", text: "#d8e0ff", "root-bg": "#d8e0ff", "root-text": "#0b1020",
+    "edge-0": "#7aa2f7", "edge-1": "#ff9e64", "edge-2": "#9ece6a", "edge-3": "#bb9af7" } },
+};
+function themeValue() { return $("theme").value || null; }
 let current = {};
 // the level the map draws vs the level the static export uses (same rules as the library, for display only)
 function levels(s, forExport) {
@@ -153,7 +159,7 @@ async function load() {
   if (mm) mm.destroy();
   current = $("icons").value === "mixed" ? mixedStatuses() : {};
   mm = createMindmap($("map"), {
-    data, mode: $("mode").value, theme: themeValue(),
+    data, mode: $("mode").value, themes: THEMES, theme: themeValue(),
     statuses: Object.keys(current).length ? current : undefined,
     state: state && name === load.last ? state : null,
     actions: [
