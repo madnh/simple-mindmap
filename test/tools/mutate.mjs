@@ -42,7 +42,17 @@ for (const m of list) {
     if (n !== 1) { applied = false; console.log(`${m.id} NOT APPLIED: "${find.slice(0, 60)}" found ${n} times in ${file}`); break; }
     writeFileSync(p, src.replace(find, () => replace));
   }
-  const restore = () => { for (const [p, src] of original) writeFileSync(p, src); };
+  // Writes the edited files back and checks them against the repository: a later mutation must start from clean code.
+  const restore = () => {
+    for (const [p, src] of original) {
+      writeFileSync(p, src);
+      if (readFileSync(p, "utf8") !== readFileSync(join(ROOT, p.slice(dir.length)), "utf8")) {
+        console.log(`${m.id} RESTORE FAILED: ${p.slice(dir.length)} differs from the repository`);
+        rmSync(base, { recursive: true, force: true });
+        process.exit(3);
+      }
+    }
+  };
   if (!applied) { notApplied++; restore(); continue; }
   const r = run(dir, m.suite);
   const failed = r.out.split("\n").filter((l) => /^\s*✖ /.test(l) && !/failing tests/.test(l)).map((l) => l.trim().slice(2));
