@@ -62,7 +62,7 @@ export const MUTATIONS = [
       ["src/mindmap.js", "    e.stopPropagation();\n    if (e.key === \"Enter\")", "    if (e.key === \"Enter\")"],
     ] },
   { id: "M26", what: "edit mode changes the data itself on drop", suite: "browser", expect: "edit mode emits intent only",
-    edits: [["src/mindmap.js", 'if (target && canDrop(d.id, target)) emit("intent", { op: "move", id: d.id, parent: target });', 'if (target && canDrop(d.id, target)) { api.apply([{ op: "move", id: d.id, parent: target }]); emit("intent", { op: "move", id: d.id, parent: target }); }']] },
+    edits: [["src/mindmap.js", 'render();\n        if (target && canDrop(d.id, target)) emit("intent", { op: "move", id: d.id, parent: target });', 'render();\n        if (target && canDrop(d.id, target)) { api.apply([{ op: "move", id: d.id, parent: target }]); emit("intent", { op: "move", id: d.id, parent: target }); }']] },
   { id: "M27", what: "bad setData clears the picture", suite: "browser", expect: "setData with bad data keeps the drawn tree",
     edits: [["src/mindmap.js", 'if (!v.ok) { errors = v.errors; emit("invalid", { errors: clone(errors), source: "setData" });', 'if (!v.ok) { errors = v.errors; data = null; render(); emit("invalid", { errors: clone(errors), source: "setData" });']] },
   { id: "M28", what: "a failed apply still replaces the data", suite: "browser", expect: "apply: a batch failing at op 3",

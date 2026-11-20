@@ -812,13 +812,15 @@ t("M2: an inline theme round-trips through getState(); a setTheme before the fir
 t("L1: export(\"svg\") writes only colours: url() / var() tokens and status colours fall back, color-mix resolves; 0 url( and 0 var(", async () => {
   const r = await ev(`
     make({ data: ${JSON.stringify(SMALL)}, theme: { tokens: { bg: "url(https://evil.test/bg)", "node-bg": "color-mix(in srgb, red 50%, blue)", "edge-0": "var(--nope)" } },
-      statuses: { decided: { color: "url(https://evil.test/p.svg#x)", path: "M1 1L11 11" }, pending: { color: "color-mix(in srgb, red 50%, blue)" } } });
+      statuses: { decided: { color: "url(https://evil.test/p.svg#x)", path: "M1 1L11 11" }, pending: { color: "color-mix(in srgb, green 50%, blue)" } } });
     const svg = mm.export("svg");
     return { url: (svg.match(/url\\((?!#)/g) || []).length, internal: (svg.match(/url\\(#/g) || []).length, vars: svg.split("var(").length - 1, mix: svg.split("color-mix").length - 1,
-      resolved: svg.split("color(srgb 0.5 0 0.5)").length - 1 + svg.split("rgb(128, 0, 128)").length - 1, bg: svg.includes('fill="#ffffff"'), probes: document.querySelectorAll("#host .simple-mindmap > span").length };`);
+      token: svg.split("color(srgb 0.5 0 0.5)").length - 1 + svg.split("rgb(128, 0, 128)").length - 1,
+      status: svg.split("color(srgb 0 0.25098 0.5)").length - 1 + svg.split("rgb(0, 64, 128)").length - 1, bg: svg.includes('fill="#ffffff"'), probes: document.querySelectorAll("#host .simple-mindmap > span").length };`);
   assert.equal(r.url, 0, "no url() other than the file's own #markers"); assert.equal(r.vars, 0); assert.equal(r.mix, 0);
   assert.ok(r.internal >= 1, "the blocks marker is still referenced");
-  assert.ok(r.resolved >= 2, `color-mix resolved for the node-bg token and the pending status (${r.resolved})`);
+  assert.ok(r.token >= 1, `the node-bg token's color-mix is resolved by the page (${r.token})`);
+  assert.ok(r.status >= 1, `the pending status colour's color-mix is resolved by the page (${r.status})`);
   assert.equal(r.bg, true, "a url() bg token falls back to the default");
   assert.equal(r.probes, 0, "the probe element is removed");
 });
