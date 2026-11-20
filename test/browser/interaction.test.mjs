@@ -846,3 +846,77 @@ t("L2: two module instances on one page (two URLs) never share an id; export(\"s
   assert.ok(r.expIds.length >= 2 && r.expIds.every((id) => id.startsWith("fileA-")), r.expIds.join());
   assert.ok(r.def.every((id) => id.startsWith("mm-")), r.def.join());
 });
+
+// ---- outline in a demo-like setup: icon levels (<use> of the hidden defs svg, image, render, symbol), a theme ----
+const OL = { root: { id: "r", title: "Root", children: [
+  { id: "a", title: "Icon row", status: "decided", children: [{ id: "a1", title: "Image row", status: "pending" }] },
+  { id: "b", title: "Render row", status: "open" }, { id: "c", title: "Symbol row", status: "parked" }, { id: "d", title: "Plain row", status: "blocked" },
+] } };
+const olMake = (mode) => ev(`make({ data: ${JSON.stringify(OL)}, view: "outline", mode: "${mode}", statuses: ${ICON_STATUSES}, themes: ${THEMES}, theme: "midnight" });
+  await new Promise((r) => setTimeout(r, 0));`);
+// the centre of `sel` inside row `id`, and what the page hit-tests there
+const olAt = (id, sel) => page.eval(`(() => { const row = document.querySelector('#host li[data-id="${id}"] > .mm-row'); const el = ${JSON.stringify(sel)} ? row.querySelector(${JSON.stringify(sel)}) : row;
+  const r = el.getBoundingClientRect(), rr = row.getBoundingClientRect(), last = row.lastElementChild.getBoundingClientRect();
+  const p = ${JSON.stringify(sel)} ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: Math.min(rr.right - 4, last.right + 40), y: rr.top + rr.height / 2 };
+  const h = document.elementFromPoint(p.x, p.y); return { ...p, hit: h ? h.tagName.toLowerCase() + "." + (h.getAttribute("class") || "") : null }; })()`);
+
+t("outline (demo-like: icon levels, theme, defs svg): a click on the title, number, icon <use>, render span or empty row space selects; double click and Enter open; ⋯ sits by the row", async () => {
+  await olMake("select");
+  assert.equal(await page.eval("document.querySelectorAll('#host .mm-outline svg.mm-defs symbol').length > 0"), true, "the hidden defs svg holds symbols");
+  assert.equal(await page.eval("document.querySelector('#host .simple-mindmap').style.getPropertyValue('--mm-bg')"), "#0b1020", "the theme is applied");
+  const cases = [["a", ".mm-title", "span.mm-title"], ["c", ".mm-num", "span.mm-num"], ["a", "svg.mm-sym use", /^(use\.|svg\.mm-sym)$/], ["a1", "svg.mm-sym use", /^use\.$/],
+    ["b", "span.mm-sym-render", null], ["d", null, "div.mm-row"]];
+  for (const [id, sel, hit] of cases) {
+    const p = await olAt(id, sel);
+    if (hit) assert.match(p.hit, hit instanceof RegExp ? hit : new RegExp(`^${hit.replace(".", "\\.")}$`), `${id} ${sel}: hit-test reaches the row content, nothing lies above it`);
+    await new Promise((r) => setTimeout(r, 500)); // never a double click
+    await page.eval("events = []");
+    await page.click(p.x, p.y);
+    assert.deepEqual(await page.eval("events.map((x) => [x.e, x.p.id])"), [["select", id]], `${id} ${sel || "empty row space"}`);
+    assert.equal(await page.eval("mm.getState().selected"), id);
+  }
+  await new Promise((r) => setTimeout(r, 500));
+  const c = await olAt("c", ".mm-title");
+  await page.eval("events = []");
+  await page.dblclick(c.x, c.y);
+  assert.deepEqual(await page.eval("events.map((x) => [x.e, x.p.id])"), [["select", "c"], ["open", "c"]]);
+  await page.eval("events = []");
+  await page.key("Enter");
+  assert.deepEqual(await page.eval("events.map((x) => [x.e, x.p.id])"), [["open", "c"]], "Enter opens: the click left the focus on the component");
+  // ⋯ next to the row's content (not at the far edge of the view), and its menu works
+  await ev(`make({ data: ${JSON.stringify(OL)}, view: "outline", mode: "select", statuses: ${ICON_STATUSES}, actions: [{ id: "log", label: "Log" }] }); await new Promise((r) => setTimeout(r, 0));`);
+  const b = await olAt("b", ".mm-title");
+  await page.click(b.x, b.y);
+  const gap = await page.eval(`(() => { const t = document.querySelector('#host li[data-id="b"] > .mm-row').lastElementChild.getBoundingClientRect(), m = document.querySelector('#host .mm-more').getBoundingClientRect();
+    return { dx: Math.round(m.left - t.right), dy: Math.round(Math.abs((m.top + m.height / 2) - (t.top + t.height / 2))) }; })()`);
+  assert.ok(gap.dx >= 0 && gap.dx <= 16 && gap.dy <= 6, `⋯ beside the row content: ${JSON.stringify(gap)}`);
+  const more = await page.eval("(() => { const r = document.querySelector('#host .mm-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
+  await page.click(more.x, more.y);
+  const item = await page.eval("(() => { const r = document.querySelector('#host .mm-menu button').getBoundingClientRect(); return { x: r.left + 5, y: r.top + r.height / 2 }; })()");
+  await page.click(item.x, item.y);
+  assert.deepEqual(await page.eval("events.at(-1)"), { e: "action", p: { action: "log", id: "b" } });
+});
+
+t("outline edit mode: drag a row onto another row emits intent move; own parent, a descendant, the root and select mode emit nothing; data unchanged", async () => {
+  await olMake("edit");
+  const d0 = await page.eval("JSON.stringify(mm.getData())");
+  const drag = async (from, to) => {
+    const a = await olAt(from, ".mm-title"), z = await olAt(to, ".mm-title");
+    await new Promise((r) => setTimeout(r, 500));
+    await page.eval("events = []");
+    await page.drag(a.x, a.y, z.x, z.y, 10);
+    return page.eval("events.map((x) => x.p.op ? [x.e, x.p] : [x.e, x.p.id])");
+  };
+  assert.deepEqual(await drag("a1", "c"), [["intent", { op: "move", id: "a1", parent: "c" }]], "a drag ends without a select");
+  assert.equal(await page.eval("document.querySelectorAll('#host .mm-row.is-dragging, #host .mm-row.is-drop, #host .mm-outline.is-dragging-row').length"), 0, "drag marks are cleared");
+  assert.deepEqual(await drag("a1", "a"), [], "onto its own parent");
+  assert.deepEqual(await drag("a", "a1"), [], "onto its own descendant");
+  assert.deepEqual(await drag("r", "c"), [], "the root does not move, and the release on another row selects nothing");
+  assert.equal(await page.eval("JSON.stringify(mm.getData())"), d0, "the component never edits the data itself");
+  const arrow = await olAt("a", ".mm-arrow");
+  await page.eval("events = []");
+  await page.click(arrow.x, arrow.y);
+  assert.deepEqual(await page.eval("events.map((x) => x.e)"), ["toggle"], "the arrow still toggles in edit mode");
+  await olMake("select");
+  assert.deepEqual(await drag("a1", "c"), [], "select mode: no move, and a press on one row released on another selects nothing (not their common ancestor)");
+});

@@ -27,6 +27,9 @@ Fixed:
   palette, status colour: grey), so no `var(` and no external `url(` reach a file.
 - `toSVG(json, {idPrefix})` and `export("svg", {idPrefix})`; component id prefixes are unique per page, also across two
   copies of the library.
+- Outline: drag-to-move in `edit` mode was never wired (map only); a row dragged onto another row now emits
+  `intent {op: "move"}` with the map's rules. The ⋯ button sits beside the row's content instead of at the far edge of
+  the view. A press on one row released on another (a text drag) no longer selects their common ancestor row.
 
 ## 1.0.2
 

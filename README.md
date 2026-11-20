@@ -238,7 +238,9 @@ with the index of the failing op (or `null` when the final check failed) and not
 
 Keyboard (when the component has focus): arrows move the selection, Enter opens, Space collapses / expands,
 Cmd/Ctrl+F focuses the search box, Escape closes the menu; in `edit` mode F2, Tab and Delete as above.
-Mouse: drag the background to pan, wheel to scroll, Cmd/Ctrl + wheel (or pinch) to zoom.
+Mouse: drag the background to pan, wheel to scroll, Cmd/Ctrl + wheel (or pinch) to zoom. Click selects, double click
+opens, ⋯ (beside the selected node or row) opens the menu. In `edit` mode drag a node (map) or a row (outline) onto another
+to move it. In the outline a click counts only when pressed and released on the same row.
 
 ### Validation and bad data
 

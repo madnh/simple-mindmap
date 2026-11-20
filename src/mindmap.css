@@ -101,6 +101,9 @@
 .simple-mindmap .mm-row .mm-title { white-space: normal; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
 .simple-mindmap .mm-row .mm-badge { color: var(--mm-muted, var(--mmd-muted)); font-size: 11px; padding-top: 2px; }
 .simple-mindmap .mm-row.is-dim { opacity: 0.35; }
+.simple-mindmap .mm-row.is-dragging { opacity: 0.5; }
+.simple-mindmap .mm-row.is-drop { box-shadow: inset 0 0 0 2px var(--mm-select, var(--mmd-select)); background: var(--mm-chip-bg, var(--mmd-chip-bg)); }
+.simple-mindmap .mm-outline.is-dragging-row, .simple-mindmap .mm-outline.is-dragging-row * { cursor: grabbing; -webkit-user-select: none; user-select: none; }
 .simple-mindmap .mm-row.is-superseded .mm-title { text-decoration: line-through; opacity: 0.55; }
 .simple-mindmap .mm-arrow {
   flex: none; width: 16px; height: 18px; border: 0; padding: 0; background: none; color: var(--mm-muted, var(--mmd-muted)); cursor: pointer; font-size: 11px;
